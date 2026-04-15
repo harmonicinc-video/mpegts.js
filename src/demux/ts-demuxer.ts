@@ -1052,7 +1052,7 @@ class TSDemuxer extends BaseDemuxer {
                     );
                     if (uid === 'GA94' && rbsp[offset + 7] === 0x03) {
                         const ccCount = rbsp[offset + 8] & 0x1F;
-                        const ccBytes = rbsp.subarray(offset + 8, offset + 9 + ccCount * 3);
+                        const ccBytes = rbsp.subarray(offset + 8, offset + 10 + ccCount * 3);
                         return { ccData: ccBytes, ccCount };
                     }
                 }
