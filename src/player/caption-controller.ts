@@ -14,15 +14,14 @@ export default class CaptionController {
     private _cea608_parser1: Cea608Parser;   // field 1 (CC1/CC2)
     private _cea608_parser2: Cea608Parser;   // field 2 (CC3/CC4)
     private _text_track: TextTrack | null = null;
-    private _dts_base_getter: () => number;
+
 
     constructor(
         mediaElement: HTMLMediaElement,
-        dtsBaseGetter: () => number,
         config: any
     ) {
         this._media_element = mediaElement;
-        this._dts_base_getter = dtsBaseGetter;
+
 
         // Create native TextTrack — browser handles rendering
         this._text_track = mediaElement.addTextTrack('captions', 'English', 'en');
@@ -47,9 +46,8 @@ export default class CaptionController {
      * @param data   { ccData: Uint8Array, ccCount: number }
      */
     onCaptionData(pts_ms: number, data: { ccData: Uint8Array, ccCount: number }): void {
-        // Rebase PTS to MSE currentTime timeline
-        const dtsBase = this._dts_base_getter();
-        const mediaTime = (pts_ms - dtsBase) / 1000;
+        // PTS is already rebased by transmuxing-controller (raw PTS - dtsBase)
+        const mediaTime = pts_ms / 1000;
 
         // Split cc_data triplets into field1/field2 byte pairs
         const fields = this.extractCea608Data(data.ccData);

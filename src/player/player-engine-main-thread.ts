@@ -306,7 +306,6 @@ class PlayerEngineMainThread implements PlayerEngine {
         if (this._config.enableCaptions && this._media_element) {
             this._caption_controller = new CaptionController(
                 this._media_element,
-                () => 0,  // dtsBase getter — will be 0 for PTS already rebased by transmuxing-controller
                 this._config
             );
         }

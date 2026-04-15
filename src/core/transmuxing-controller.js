@@ -457,7 +457,13 @@ class TransmuxingController {
     }
 
     _onCaptionData(pts, data) {
-        this._emitter.emit(TransmuxingEvents.CAPTION_DATA_ARRIVED, pts, data);
+        let timestamp_base = this._remuxer.getTimestampBase();
+        if (timestamp_base === undefined) {
+            // remuxer hasn't calculated dtsBase yet — drop this early data
+            return;
+        }
+        let rebased_pts = pts - timestamp_base;
+        this._emitter.emit(TransmuxingEvents.CAPTION_DATA_ARRIVED, rebased_pts, data);
     }
 
     _onPESPrivateDataDescriptor(descriptor) {
