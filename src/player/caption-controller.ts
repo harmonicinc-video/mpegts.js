@@ -50,16 +50,17 @@ export default class CaptionController {
         // PTS is already rebased by transmuxing-controller (raw PTS - dtsBase)
         const mediaTime = pts_ms / 1000;
 
-        // DEBUG: dump first 10 cc_data arrays
-        if (!this._debugCount) { this._debugCount = 0; }
-        if (this._debugCount < 10) {
-            const hex = Array.from(data.ccData).map(b => '0x' + b.toString(16).padStart(2, '0')).join(',');
-            console.warn(`CC_DEBUG #${this._debugCount} pts=${pts_ms.toFixed(0)}ms ccCount=${data.ccCount} len=${data.ccData.length} bytes=[${hex}]`);
+        // Split cc_data triplets into field1/field2 byte pairs
+        const fields = this.extractCea608Data(data.ccData);
+
+        // DEBUG: log non-null field1 data
+        if (fields[0].length > 0 && this._debugCount < 5) {
+            const f1hex = fields[0].map((b: number) => '0x' + b.toString(16).padStart(2, '0')).join(',');
+            const raw = Array.from(data.ccData.subarray(0, 20)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(',');
+            console.warn(`CC_DATA #${this._debugCount} pts=${pts_ms.toFixed(0)} f1=[${f1hex}] f1chars="${fields[0].filter((_:number,i:number) => i%2===0).map((b:number) => String.fromCharCode(b & 0x7f)).join('')}" raw=[${raw}...]`);
             this._debugCount++;
         }
 
-        // Split cc_data triplets into field1/field2 byte pairs
-        const fields = this.extractCea608Data(data.ccData);
         if (fields[0].length > 0) {
             this._cea608_parser1.addData(mediaTime, fields[0]);
         }
