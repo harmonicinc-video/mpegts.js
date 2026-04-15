@@ -8,6 +8,7 @@
 export default class CaptionRenderer {
     private _container;
     private _textElement;
+    private _videoElement;
     private _currentText;
     constructor(videoElement: HTMLMediaElement);
     /** Update the displayed text (live display model). */
@@ -15,4 +16,10 @@ export default class CaptionRenderer {
     setVisible(visible: boolean): void;
     clear(): void;
     destroy(): void;
+    /**
+     * Compute font size based on video container height.
+     * CEA-708 defines 15 rows; each row ~5.33% of height (like Shaka).
+     * We use ~4.5% for comfortable reading.
+     */
+    private _computeFontSize;
 }

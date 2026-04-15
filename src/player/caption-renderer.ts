@@ -8,9 +8,11 @@
 export default class CaptionRenderer {
     private _container: HTMLDivElement;
     private _textElement: HTMLDivElement;
+    private _videoElement: HTMLMediaElement;
     private _currentText: string = '';
 
     constructor(videoElement: HTMLMediaElement) {
+        this._videoElement = videoElement;
         // Create overlay container positioned over the video
         this._container = document.createElement('div');
         this._container.className = 'mpegts-caption-container';
@@ -64,7 +66,7 @@ export default class CaptionRenderer {
                 backgroundColor: 'rgba(0, 0, 0, 0.75)',
                 color: '#FFFFFF',
                 fontFamily: 'Consolas, "Courier New", Courier, monospace',
-                fontSize: 'clamp(16px, 2.2vw, 28px)',
+                fontSize: this._computeFontSize() + 'px',
                 fontWeight: '500',
                 padding: '3px 10px',
                 lineHeight: '1.5',
@@ -93,5 +95,18 @@ export default class CaptionRenderer {
         if (this._container.parentNode) {
             this._container.parentNode.removeChild(this._container);
         }
+        this._videoElement = null;
+    }
+
+    /**
+     * Compute font size based on video container height.
+     * CEA-708 defines 15 rows; each row ~5.33% of height (like Shaka).
+     * We use ~4.5% for comfortable reading.
+     */
+    private _computeFontSize(): number {
+        const containerHeight = this._videoElement?.parentElement?.clientHeight
+            || this._videoElement?.clientHeight || 480;
+        const size = Math.round(containerHeight * 0.045);
+        return Math.max(18, Math.min(size, 42));
     }
 }
