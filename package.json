@@ -20,7 +20,8 @@
     "build": "webpack --mode=production --progress",
     "build:debug": "webpack --mode=development --progress",
     "watch": "webpack --mode=development --progress --watch",
-    "serve": "webpack serve --mode=development --progress"
+    "serve": "webpack serve --mode=development --progress",
+    "prepare": "webpack --mode=production"
   },
   "dependencies": {
     "es6-promise": "^4.2.5"
