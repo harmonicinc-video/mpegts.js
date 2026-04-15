@@ -1,27 +1,18 @@
 /**
  * CaptionRenderer
  *
- * DOM-based caption renderer inspired by Shaka Player's UITextDisplayer.
- * Creates a styled overlay on top of the video element instead of using
- * the browser's native VTTCue/TextTrack rendering.
+ * DOM-based caption renderer using a live display model (like VLC).
+ * Instead of timed cues, it simply shows "what the current text is"
+ * and updates it whenever the decoder state changes.
  */
 export default class CaptionRenderer {
     private _container;
-    private _videoElement;
-    private _cues;
-    private _rafId;
-    private _visible;
+    private _textElement;
+    private _currentText;
     constructor(videoElement: HTMLMediaElement);
-    /** Add a caption cue to the renderer */
-    addCue(startTime: number, endTime: number, text: string): void;
-    /** Set visibility */
+    /** Update the displayed text (live display model). */
+    setText(text: string): void;
     setVisible(visible: boolean): void;
-    /** Clear all cues */
     clear(): void;
-    /** Destroy the renderer */
     destroy(): void;
-    private _startLoop;
-    private _tick;
-    private _updateCues;
-    private _createCueElement;
 }

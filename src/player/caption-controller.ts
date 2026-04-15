@@ -171,8 +171,9 @@ export default class CaptionController {
     private _updateLiveDisplay(): void {
         if (!this._renderer) return;
         const parts: string[] = [];
-        for (const svc of this._cea708_services.values()) {
-            const t = svc.getDisplayText();
+        const services = Array.from(this._cea708_services) as any[];
+        for (let i = 0; i < services.length; i++) {
+            const t = services[i][1].getDisplayText();
             if (t) parts.push(t);
         }
         this._renderer.setText(parts.join('\n'));

@@ -24,8 +24,8 @@ export default class CaptionController {
      * Based on Shaka Player's CeaDecoder.extract().
      */
     private extractCcData;
-    /** Add a CEA-708 caption to the DOM renderer */
-    private addCea708Cue;
+    /** Update the renderer with current visible text from all 708 services. */
+    private _updateLiveDisplay;
     enableCaptions(): void;
     disableCaptions(): void;
     reset(): void;

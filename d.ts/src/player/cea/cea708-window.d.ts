@@ -35,4 +35,6 @@ export declare class Cea708Window {
     hide(): void;
     toggle(): void;
     setStartTime(pts: number): void;
+    /** Get the current visible text in this window (live display). */
+    getDisplayText(): string;
 }

@@ -7,6 +7,8 @@ export declare class Cea708Service {
     constructor(serviceNumber: number);
     handleCea708ControlCode(pkt: DtvccPacket): Cea708Caption[];
     clear(): void;
+    /** Get combined text from all visible windows (live display). */
+    getDisplayText(): string;
     private handleG0;
     private handleG1;
     private handleG2;
