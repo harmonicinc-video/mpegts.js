@@ -14,6 +14,7 @@ export default class CaptionController {
     private _cea608_parser1: Cea608Parser;   // field 1 (CC1/CC2)
     private _cea608_parser2: Cea608Parser;   // field 2 (CC3/CC4)
     private _text_track: TextTrack | null = null;
+    private _debugCount: number = 0;
 
 
     constructor(
@@ -48,6 +49,14 @@ export default class CaptionController {
     onCaptionData(pts_ms: number, data: { ccData: Uint8Array, ccCount: number }): void {
         // PTS is already rebased by transmuxing-controller (raw PTS - dtsBase)
         const mediaTime = pts_ms / 1000;
+
+        // DEBUG: dump first 10 cc_data arrays
+        if (!this._debugCount) { this._debugCount = 0; }
+        if (this._debugCount < 10) {
+            const hex = Array.from(data.ccData).map(b => '0x' + b.toString(16).padStart(2, '0')).join(',');
+            Log.v(this.TAG, `CC_DEBUG #${this._debugCount} pts=${pts_ms.toFixed(0)}ms ccCount=${data.ccCount} len=${data.ccData.length} bytes=[${hex}]`);
+            this._debugCount++;
+        }
 
         // Split cc_data triplets into field1/field2 byte pairs
         const fields = this.extractCea608Data(data.ccData);
