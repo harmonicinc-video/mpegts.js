@@ -4,6 +4,7 @@ export default class CaptionController {
     private _cea608_parser1;
     private _cea608_parser2;
     private _text_track;
+    private _renderer;
     private _dtvcc_builder;
     private _cea708_services;
     private _cea708_order;
@@ -23,7 +24,7 @@ export default class CaptionController {
      * Based on Shaka Player's CeaDecoder.extract().
      */
     private extractCcData;
-    /** Add a CEA-708 caption as a VTTCue */
+    /** Add a CEA-708 caption to the DOM renderer */
     private addCea708Cue;
     enableCaptions(): void;
     disableCaptions(): void;

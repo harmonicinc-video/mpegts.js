@@ -9,6 +9,7 @@
 import Log from '../utils/logger';
 import Cea608Parser from './cea608-parser';
 import CaptionOutputFilter from './caption-output-filter';
+import CaptionRenderer from './caption-renderer';
 import { Cea708Byte, DtvccPacketBuilder, DTVCC_PACKET_DATA, DTVCC_PACKET_START } from './cea/dtvcc-packet';
 import { Cea708Service } from './cea/cea708-service';
 import { Cea708Caption } from './cea/cea708-window';
@@ -19,6 +20,7 @@ export default class CaptionController {
     private _cea608_parser1: Cea608Parser;   // field 1 (CC1/CC2)
     private _cea608_parser2: Cea608Parser;   // field 2 (CC3/CC4)
     private _text_track: TextTrack | null = null;
+    private _renderer: CaptionRenderer | null = null;
 
     // CEA-708 DTVCC
     private _dtvcc_builder: DtvccPacketBuilder;
@@ -33,9 +35,13 @@ export default class CaptionController {
     ) {
         this._media_element = mediaElement;
 
-        // Create native TextTrack — browser handles rendering
+        // Create native TextTrack (hidden — used for CEA-608 fallback only)
         this._text_track = mediaElement.addTextTrack('captions', 'English', 'en');
-        this._text_track.mode = config.showCaptions ? 'showing' : 'hidden';
+        this._text_track.mode = 'hidden';  // always hidden — we use CaptionRenderer
+
+        // DOM-based caption renderer (VLC-quality rendering)
+        this._renderer = new CaptionRenderer(mediaElement);
+        this._renderer.setVisible(config.showCaptions !== false);
 
         // CEA-608: OutputFilter bridges parser → TextTrack (VTTCue)
         const filter1 = new CaptionOutputFilter(this._text_track);
@@ -162,31 +168,24 @@ export default class CaptionController {
         return { field1, field2, cea708 };
     }
 
-    /** Add a CEA-708 caption as a VTTCue */
+    /** Add a CEA-708 caption to the DOM renderer */
     private addCea708Cue(caption: Cea708Caption): void {
-        if (!this._text_track || !caption.text) return;
-        try {
-            const cue = new VTTCue(caption.startTime, caption.endTime, caption.text);
-            cue.line = -3;
-            cue.size = 80;
-            cue.align = 'center' as AlignSetting;
-            this._text_track.addCue(cue);
-        } catch (e) {
-            // VTTCue not available
-        }
+        if (!this._renderer || !caption.text) return;
+        this._renderer.addCue(caption.startTime, caption.endTime, caption.text);
     }
 
     enableCaptions(): void {
-        if (this._text_track) { this._text_track.mode = 'showing'; }
+        if (this._renderer) { this._renderer.setVisible(true); }
     }
 
     disableCaptions(): void {
-        if (this._text_track) { this._text_track.mode = 'hidden'; }
+        if (this._renderer) { this._renderer.setVisible(false); }
     }
 
     reset(): void {
         if (this._cea608_parser1) { this._cea608_parser1.reset(); }
         if (this._cea608_parser2) { this._cea608_parser2.reset(); }
+        if (this._renderer) { this._renderer.clear(); }
         this._dtvcc_builder.clear();
         this._cea708_services.clear();
         this._cea708_order = 0;
@@ -199,6 +198,7 @@ export default class CaptionController {
         this._dtvcc_builder = null;
         this._cea708_services = null;
         this._text_track = null;
+        if (this._renderer) { this._renderer.destroy(); this._renderer = null; }
         this._media_element = null;
     }
 }
