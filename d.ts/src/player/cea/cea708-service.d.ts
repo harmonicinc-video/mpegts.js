@@ -4,6 +4,10 @@ export declare class Cea708Service {
     private serviceNumber;
     private windows;
     private currentWindow;
+    /** VLC-style: true when visible text has been written since last output */
+    textWaiting: boolean;
+    /** Set to true when display should be refreshed (like VLC STATUS_OUTPUT) */
+    needsDisplay: boolean;
     constructor(serviceNumber: number);
     handleCea708ControlCode(pkt: DtvccPacket): Cea708Caption[];
     clear(): void;

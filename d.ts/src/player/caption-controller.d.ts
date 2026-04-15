@@ -24,8 +24,8 @@ export default class CaptionController {
      * Based on Shaka Player's CeaDecoder.extract().
      */
     private extractCcData;
-    /** Update the renderer with current visible text from all 708 services. */
-    private _updateLiveDisplay;
+    /** Check if any service needs a display refresh (VLC-style batching). */
+    private _checkNeedsDisplay;
     enableCaptions(): void;
     disableCaptions(): void;
     reset(): void;

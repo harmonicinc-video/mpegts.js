@@ -101,8 +101,8 @@ export default class CaptionController {
             }
             this._dtvcc_builder.clearBuiltPackets();
 
-            // Live display: read current visible window text
-            this._updateLiveDisplay();
+            // VLC-style: only update display when a service signals it
+            this._checkNeedsDisplay();
         }
 
         // --- CEA-608 path (only if no DTVCC data in stream) ---
@@ -167,16 +167,26 @@ export default class CaptionController {
         return { field1, field2, cea708 };
     }
 
-    /** Update the renderer with current visible text from all 708 services. */
-    private _updateLiveDisplay(): void {
+    /** Check if any service needs a display refresh (VLC-style batching). */
+    private _checkNeedsDisplay(): void {
         if (!this._renderer) return;
-        const parts: string[] = [];
+        let needsUpdate = false;
         const services = Array.from(this._cea708_services) as any[];
         for (let i = 0; i < services.length; i++) {
-            const t = services[i][1].getDisplayText();
-            if (t) parts.push(t);
+            const svc = services[i][1];
+            if (svc.needsDisplay) {
+                needsUpdate = true;
+                svc.needsDisplay = false;
+            }
         }
-        this._renderer.setText(parts.join('\n'));
+        if (needsUpdate) {
+            const parts: string[] = [];
+            for (let i = 0; i < services.length; i++) {
+                const t = services[i][1].getDisplayText();
+                if (t) parts.push(t);
+            }
+            this._renderer.setText(parts.join('\n'));
+        }
     }
 
     enableCaptions(): void {

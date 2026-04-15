@@ -6,6 +6,7 @@ export interface Cea708Caption {
 }
 export declare class Cea708Window {
     private visible;
+    private defined;
     private rowCount;
     private colCount;
     private startTime;
@@ -17,6 +18,7 @@ export declare class Cea708Window {
     private serviceNumber;
     constructor(windowNum: number, serviceNumber: number);
     defineWindow(visible: boolean, _vAnchor: number, _hAnchor: number, _anchorId: number, _relToggle: boolean, rowCount: number, colCount: number): void;
+    isDefined(): boolean;
     resetMemory(): void;
     setCharacter(char: string): void;
     backspace(): void;

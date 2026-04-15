@@ -18,6 +18,7 @@ export interface Cea708Caption {
 
 export class Cea708Window {
     private visible = false;
+    private defined = false;
     private rowCount = 0;
     private colCount = 0;
     private startTime = 0;
@@ -36,10 +37,13 @@ export class Cea708Window {
     defineWindow(visible: boolean, _vAnchor: number, _hAnchor: number,
                  _anchorId: number, _relToggle: boolean,
                  rowCount: number, colCount: number): void {
+        this.defined = true;
         this.visible = visible;
         this.rowCount = rowCount;
         this.colCount = colCount;
     }
+
+    isDefined(): boolean { return this.defined; }
 
     resetMemory(): void {
         this.memory = [];

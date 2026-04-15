@@ -24,6 +24,10 @@ export class Cea708Service {
     private windows: (Cea708Window | null)[] =
         [null, null, null, null, null, null, null, null];
     private currentWindow: Cea708Window | null = null;
+    /** VLC-style: true when visible text has been written since last output */
+    public textWaiting: boolean = false;
+    /** Set to true when display should be refreshed (like VLC STATUS_OUTPUT) */
+    public needsDisplay: boolean = false;
 
     constructor(serviceNumber: number) {
         this.serviceNumber = serviceNumber;
@@ -39,7 +43,14 @@ export class Cea708Service {
         }
 
         if (cc >= 0x00 && cc <= 0x1f) return this.handleC0(pkt, cc, pts);
-        if (cc >= 0x80 && cc <= 0x9f) return this.handleC1(pkt, cc, pts);
+        if (cc >= 0x80 && cc <= 0x9f) {
+            // VLC: flush pending text before any C1 command
+            if (this.textWaiting) {
+                this.needsDisplay = true;
+                this.textWaiting = false;
+            }
+            return this.handleC1(pkt, cc, pts);
+        }
         if (cc >= 0x1000 && cc <= 0x101f) { this.handleC2(pkt, cc & 0xff); return []; }
         if (cc >= 0x1080 && cc <= 0x109f) { this.handleC3(pkt, cc & 0xff); return []; }
         if (cc >= 0x20 && cc <= 0x7f) this.handleG0(cc);
@@ -68,51 +79,81 @@ export class Cea708Service {
     // --- Character groups ---
 
     private handleG0(cc: number): void {
-        if (!this.currentWindow) return;
+        if (!this.currentWindow || !this.currentWindow.isDefined()) return;
         this.currentWindow.setCharacter(
             cc === 0x7f ? '♪' : String.fromCharCode(cc));
+        // VLC: flush on space (word boundary)
+        if (cc === 0x20 && this.textWaiting) {
+            this.needsDisplay = true;
+        }
+        if (this.currentWindow.isVisible()) this.textWaiting = true;
     }
 
     private handleG1(cc: number): void {
-        if (!this.currentWindow) return;
+        if (!this.currentWindow || !this.currentWindow.isDefined()) return;
         this.currentWindow.setCharacter(String.fromCharCode(cc));
+        if (this.currentWindow.isVisible()) this.textWaiting = true;
     }
 
     private handleG2(cc: number): void {
-        if (!this.currentWindow) return;
+        if (!this.currentWindow || !this.currentWindow.isDefined()) return;
         this.currentWindow.setCharacter(G2Charset.get(cc) || '_');
+        if (this.currentWindow.isVisible()) this.textWaiting = true;
     }
 
     private handleG3(cc: number): void {
-        if (!this.currentWindow) return;
+        if (!this.currentWindow || !this.currentWindow.isDefined()) return;
         this.currentWindow.setCharacter(cc === 0xa0 ? '[CC]' : '_');
+        if (this.currentWindow.isVisible()) this.textWaiting = true;
     }
 
     // --- Control code groups ---
 
     private handleC0(pkt: DtvccPacket, cc: number, pts: number): Cea708Caption[] {
-        if (!this.currentWindow) return [];
+        if (!this.currentWindow || !this.currentWindow.isDefined()) {
+            // Still need to consume P16 bytes
+            if (cc === 0x18) { pkt.readByte(); pkt.readByte(); }
+            return [];
+        }
         if (cc === 0x18) {
-            // P16 — 2-byte unicode char
             const b1 = pkt.readByte().value;
             const b2 = pkt.readByte().value;
             this.currentWindow.setCharacter(
                 String.fromCharCode((b1 << 8) | b2));
+            if (this.currentWindow.isVisible()) this.textWaiting = true;
             return [];
         }
         const w = this.currentWindow;
         let cap: Cea708Caption | null = null;
         switch (cc) {
-            case 0x08: w.backspace(); break;      // BS
-            case 0x0d:                              // CR
-                if (w.isVisible()) cap = w.forceEmit(pts, this.serviceNumber);
-                w.carriageReturn(); break;
-            case 0x0e:                              // HCR
-                if (w.isVisible()) cap = w.forceEmit(pts, this.serviceNumber);
-                w.horizontalCarriageReturn(); break;
+            case 0x03:                              // ETX — End of Text
+                if (this.textWaiting) {
+                    this.needsDisplay = true;
+                    this.textWaiting = false;
+                }
+                break;
+            case 0x08:                              // BS
+                w.backspace();
+                this.textWaiting = true;
+                break;
             case 0x0c:                              // FF
                 if (w.isVisible()) cap = w.forceEmit(pts, this.serviceNumber);
-                w.resetMemory(); w.setPenLocation(0, 0); break;
+                w.resetMemory(); w.setPenLocation(0, 0);
+                this.textWaiting = true;
+                this.needsDisplay = true;
+                break;
+            case 0x0d:                              // CR
+                w.carriageReturn();
+                if (w.isVisible()) {
+                    this.needsDisplay = true;
+                }
+                break;
+            case 0x0e:                              // HCR
+                w.horizontalCarriageReturn();
+                if (w.isVisible()) {
+                    this.needsDisplay = true;
+                }
+                break;
         }
         return cap ? [cap] : [];
     }
