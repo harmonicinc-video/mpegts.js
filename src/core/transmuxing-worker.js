@@ -62,6 +62,7 @@ let TransmuxingWorker = function (self) {
                 controller.on(TransmuxingEvents.ASYNCHRONOUS_KLV_METADATA_ARRIVED, onAsynchronousKLVMetadataArrived.bind(this));
                 controller.on(TransmuxingEvents.SMPTE2038_METADATA_ARRIVED, onSMPTE2038MetadataArrived.bind(this));
                 controller.on(TransmuxingEvents.SCTE35_METADATA_ARRIVED, onSCTE35MetadataArrived.bind(this));
+                controller.on(TransmuxingEvents.CAPTION_DATA_ARRIVED, onCaptionDataArrived.bind(this));
                 controller.on(TransmuxingEvents.PES_PRIVATE_DATA_DESCRIPTOR, onPESPrivateDataDescriptor.bind(this));
                 controller.on(TransmuxingEvents.PES_PRIVATE_DATA_ARRIVED, onPESPrivateDataArrived.bind(this));
                 controller.on(TransmuxingEvents.STATISTICS_INFO, onStatisticsInfo.bind(this));
@@ -207,6 +208,14 @@ let TransmuxingWorker = function (self) {
         let obj = {
             msg: TransmuxingEvents.SCTE35_METADATA_ARRIVED,
             data: data
+        };
+        self.postMessage(obj);
+    }
+
+    function onCaptionDataArrived (pts, data) {
+        let obj = {
+            msg: TransmuxingEvents.CAPTION_DATA_ARRIVED,
+            data: { pts: pts, data: data }
         };
         self.postMessage(obj);
     }

@@ -15,6 +15,10 @@ type OnSynchronousKLVMetadataCallback = (synchronous_klv_data: KLVData) => void;
 type OnAsynchronousKLVMetadataCallback = (asynchronous_klv_data: PESPrivateData) => void;
 type OnSMPTE2038MetadataCallback = (smpte2038_data: SMPTE2038Data) => void;
 type OnSCTE35MetadataCallback = (scte35_data: SCTE35Data) => void;
+type OnCaptionDataCallback = (pts: number, data: {
+    ccData: Uint8Array;
+    ccCount: number;
+}) => void;
 type OnPESPrivateDataCallback = (private_data: PESPrivateData) => void;
 type OnPESPrivateDataDescriptorCallback = (private_data_descriptor: PESPrivateDataDescriptor) => void;
 export default abstract class BaseDemuxer {
@@ -29,6 +33,7 @@ export default abstract class BaseDemuxer {
     onAsynchronousKLVMetadata: OnAsynchronousKLVMetadataCallback;
     onSMPTE2038Metadata: OnSMPTE2038MetadataCallback;
     onSCTE35Metadata: OnSCTE35MetadataCallback;
+    onCaptionData: OnCaptionDataCallback;
     onPESPrivateData: OnPESPrivateDataCallback;
     onPESPrivateDataDescriptor: OnPESPrivateDataDescriptorCallback;
     constructor();

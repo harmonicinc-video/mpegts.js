@@ -141,6 +141,18 @@ class MSEPlayer {
         return this._player_engine.statisticsInfo;
     }
 
+    public enableCaptions(): void {
+        if (this._player_engine && (this._player_engine as any)._caption_controller) {
+            (this._player_engine as any)._caption_controller.enableCaptions();
+        }
+    }
+
+    public disableCaptions(): void {
+        if (this._player_engine && (this._player_engine as any)._caption_controller) {
+            (this._player_engine as any)._caption_controller.disableCaptions();
+        }
+    }
+
 }
 
 export default MSEPlayer;

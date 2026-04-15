@@ -33,6 +33,7 @@ import LoadingController from './loading-controller';
 import StartupStallJumper from './startup-stall-jumper';
 import LiveLatencyChaser from './live-latency-chaser';
 import LiveLatencySynchronizer from './live-latency-synchronizer';
+import CaptionController from './caption-controller';
 
 class PlayerEngineMainThread implements PlayerEngine {
 
@@ -54,6 +55,7 @@ class PlayerEngineMainThread implements PlayerEngine {
     private _startup_stall_jumper?: StartupStallJumper = null;
     private _live_latency_chaser?: LiveLatencyChaser = null;
     private _live_latency_synchronizer?: LiveLatencySynchronizer = null;
+    private _caption_controller?: CaptionController = null;
 
     private _mse_source_opened: boolean = false;
     private _has_pending_load: boolean = false;
@@ -246,6 +248,12 @@ class PlayerEngineMainThread implements PlayerEngine {
         this._transmuxer.on(TransmuxingEvents.SCTE35_METADATA_ARRIVED, (scte35_metadata: any) => {
             this._emitter.emit(PlayerEvents.SCTE35_METADATA_ARRIVED, scte35_metadata);
         });
+        this._transmuxer.on(TransmuxingEvents.CAPTION_DATA_ARRIVED, (pts: number, data: any) => {
+            this._emitter.emit(PlayerEvents.CAPTION_DATA_ARRIVED, pts, data);
+            if (this._caption_controller) {
+                this._caption_controller.onCaptionData(pts, data);
+            }
+        });
         this._transmuxer.on(TransmuxingEvents.PES_PRIVATE_DATA_DESCRIPTOR, (descriptor: any) => {
             this._emitter.emit(PlayerEvents.PES_PRIVATE_DATA_DESCRIPTOR, descriptor);
         });
@@ -293,6 +301,15 @@ class PlayerEngineMainThread implements PlayerEngine {
         }
 
         this._transmuxer.open();
+
+        // Initialize CaptionController if captions are enabled
+        if (this._config.enableCaptions && this._media_element) {
+            this._caption_controller = new CaptionController(
+                this._media_element,
+                () => 0,  // dtsBase getter — will be 0 for PTS already rebased by transmuxing-controller
+                this._config
+            );
+        }
     }
 
     public unload(): void {
@@ -318,6 +335,9 @@ class PlayerEngineMainThread implements PlayerEngine {
         this._transmuxer?.close();
         this._transmuxer?.destroy();
         this._transmuxer = null;
+
+        this._caption_controller?.destroy();
+        this._caption_controller = null;
     }
 
     public play(): Promise<void> {

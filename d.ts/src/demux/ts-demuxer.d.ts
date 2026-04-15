@@ -66,6 +66,9 @@ declare class TSDemuxer extends BaseDemuxer {
     private parsePMT;
     private parseSCTE35;
     private parseAV1Payload;
+    private removeEmulationPreventionBytes;
+    private extractCEA608FromSEI;
+    private extractCEA608FromH265SEI;
     private parseH264Payload;
     private parseH265Payload;
     private detectVideoMetadataChange;

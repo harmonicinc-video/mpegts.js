@@ -14,6 +14,7 @@ declare class PlayerEngineMainThread implements PlayerEngine {
     private _startup_stall_jumper?;
     private _live_latency_chaser?;
     private _live_latency_synchronizer?;
+    private _caption_controller?;
     private _mse_source_opened;
     private _has_pending_load;
     private _loaded_metadata_received;

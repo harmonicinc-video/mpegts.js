@@ -67,6 +67,7 @@ class Transmuxer {
             ctl.on(TransmuxingEvents.ASYNCHRONOUS_KLV_METADATA_ARRIVED, this._onAsynchronousKLVMetadataArrived.bind(this));
             ctl.on(TransmuxingEvents.SMPTE2038_METADATA_ARRIVED, this._onSMPTE2038MetadataArrived.bind(this));
             ctl.on(TransmuxingEvents.SCTE35_METADATA_ARRIVED, this._onSCTE35MetadataArrived.bind(this));
+            ctl.on(TransmuxingEvents.CAPTION_DATA_ARRIVED, this._onCaptionDataArrived.bind(this));
             ctl.on(TransmuxingEvents.PES_PRIVATE_DATA_DESCRIPTOR, this._onPESPrivateDataDescriptor.bind(this));
             ctl.on(TransmuxingEvents.PES_PRIVATE_DATA_ARRIVED, this._onPESPrivateDataArrived.bind(this));
             ctl.on(TransmuxingEvents.STATISTICS_INFO, this._onStatisticsInfo.bind(this));
@@ -221,6 +222,12 @@ class Transmuxer {
         })
     }
 
+    _onCaptionDataArrived (pts, data) {
+        Promise.resolve().then(() => {
+            this._emitter.emit(TransmuxingEvents.CAPTION_DATA_ARRIVED, pts, data);
+        })
+    }
+
     _onPESPrivateDataDescriptor(data) {
         Promise.resolve().then(() => {
             this._emitter.emit(TransmuxingEvents.PES_PRIVATE_DATA_DESCRIPTOR, data);
@@ -299,6 +306,9 @@ class Transmuxer {
             case TransmuxingEvents.PES_PRIVATE_DATA_ARRIVED:
             case TransmuxingEvents.STATISTICS_INFO:
                 this._emitter.emit(message.msg, data);
+                break;
+            case TransmuxingEvents.CAPTION_DATA_ARRIVED:
+                this._emitter.emit(message.msg, data.pts, data.data);
                 break;
             case TransmuxingEvents.IO_ERROR:
             case TransmuxingEvents.DEMUX_ERROR:

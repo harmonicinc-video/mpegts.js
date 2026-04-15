@@ -32,6 +32,7 @@ enum TransmuxingEvents {
     ASYNCHRONOUS_KLV_METADATA_ARRIVED = 'asynchronous_klv_metadata_arrived',
     SMPTE2038_METADATA_ARRIVED = 'smpte2038_metadata_arrived',
     SCTE35_METADATA_ARRIVED = 'scte35_metadata_arrived',
+    CAPTION_DATA_ARRIVED = 'caption_data_arrived',
     PES_PRIVATE_DATA_DESCRIPTOR = 'pes_private_data_descriptor',
     PES_PRIVATE_DATA_ARRIVED = 'pes_private_data_arrived',
     STATISTICS_INFO = 'statistics_info',

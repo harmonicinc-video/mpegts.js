@@ -57,7 +57,10 @@ export const defaultConfig = {
     // referrerPolicy: leave as unspecified
 
     headers: undefined,
-    customLoader: undefined
+    customLoader: undefined,
+
+    enableCaptions: false,
+    showCaptions: true,
 };
 
 export function createDefaultConfig() {

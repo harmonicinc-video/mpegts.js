@@ -328,6 +328,7 @@ class TransmuxingController {
         demuxer.onAsynchronousKLVMetadata = this._onAsynchronousKLVMetadata.bind(this);
         demuxer.onSMPTE2038Metadata = this._onSMPTE2038Metadata.bind(this);
         demuxer.onSCTE35Metadata = this._onSCTE35Metadata.bind(this);
+        demuxer.onCaptionData = this._onCaptionData.bind(this);
         demuxer.onPESPrivateDataDescriptor = this._onPESPrivateDataDescriptor.bind(this);
         demuxer.onPESPrivateData = this._onPESPrivateData.bind(this);
 
@@ -453,6 +454,10 @@ class TransmuxingController {
         }
 
         this._emitter.emit(TransmuxingEvents.SCTE35_METADATA_ARRIVED, scte35);
+    }
+
+    _onCaptionData(pts, data) {
+        this._emitter.emit(TransmuxingEvents.CAPTION_DATA_ARRIVED, pts, data);
     }
 
     _onPESPrivateDataDescriptor(descriptor) {

@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+    <title>mpegts.js CEA-608 Caption Test</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+               background: #1a1a2e; color: #eee; padding: 20px; }
+        h1 { color: #e94560; margin-bottom: 16px; font-size: 24px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        .url-bar { display: flex; gap: 8px; margin-bottom: 16px; }
+        .url-bar input { flex: 1; padding: 10px; border-radius: 6px; border: 1px solid #333;
+                         background: #16213e; color: #eee; font-size: 14px; }
+        .url-bar button { padding: 10px 20px; border-radius: 6px; border: none;
+                          background: #e94560; color: white; cursor: pointer; font-weight: 600; }
+        .url-bar button:hover { background: #c73650; }
+        .video-wrap { position: relative; background: #000; border-radius: 8px;
+                      overflow: hidden; margin-bottom: 16px; }
+        video { width: 100%; display: block; }
+        video::cue { background: rgba(0,0,0,0.8); color: #fff; font-size: 20px;
+                     font-family: monospace; }
+        .controls { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+        .controls button { padding: 8px 16px; border-radius: 6px; border: 1px solid #333;
+                           background: #16213e; color: #eee; cursor: pointer; }
+        .controls button:hover { background: #0f3460; }
+        .controls button.active { background: #e94560; border-color: #e94560; }
+        .log { background: #0a0a1a; border: 1px solid #333; border-radius: 6px;
+               padding: 12px; font-family: monospace; font-size: 12px; color: #8888ff;
+               height: 200px; overflow-y: auto; white-space: pre-wrap; }
+        .status { padding: 8px 12px; background: #16213e; border-radius: 6px;
+                  margin-bottom: 16px; font-size: 13px; }
+        .status span { color: #4ecca3; font-weight: 600; }
+        .drop-zone { border: 2px dashed #333; border-radius: 8px; padding: 20px;
+                     text-align: center; color: #666; margin-bottom: 16px; cursor: pointer; }
+        .drop-zone.dragover { border-color: #e94560; color: #e94560; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 mpegts.js CEA-608/708 Caption Test</h1>
+
+        <div class="url-bar">
+            <input id="tsUrl" type="text" placeholder="Enter .ts URL or drag & drop a file below..." />
+            <button onclick="loadUrl()">Load URL</button>
+        </div>
+
+        <div class="drop-zone" id="dropZone"
+             ondragover="event.preventDefault(); this.classList.add('dragover')"
+             ondragleave="this.classList.remove('dragover')"
+             ondrop="handleDrop(event)">
+            📂 Drag & drop a .ts file here, or click to select
+            <input type="file" id="fileInput" accept=".ts,.mpg,.mpeg,.m2ts"
+                   style="display:none" onchange="handleFile(this.files[0])">
+        </div>
+
+        <div class="video-wrap">
+            <video id="videoEl" controls autoplay></video>
+        </div>
+
+        <div class="status">
+            Caption events received: <span id="captionCount">0</span> |
+            Cues on track: <span id="cueCount">0</span> |
+            Status: <span id="statusText">Ready</span>
+        </div>
+
+        <div class="controls">
+            <button id="btnCC" onclick="toggleCC()" class="active">CC ON</button>
+            <button onclick="clearLog()">Clear Log</button>
+            <button onclick="destroyPlayer()">Destroy</button>
+        </div>
+
+        <div class="log" id="logBox"></div>
+    </div>
+
+    <script src="../dist/mpegts.js"></script>
+    <script>
+        var player = null;
+        var captionCount = 0;
+        var fileObjectURL = null;
+
+        document.getElementById('dropZone').addEventListener('click', function() {
+            document.getElementById('fileInput').click();
+        });
+
+        function log(msg) {
+            var box = document.getElementById('logBox');
+            var ts = new Date().toISOString().substr(11, 12);
+            box.textContent += '[' + ts + '] ' + msg + '\n';
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function loadUrl() {
+            var url = document.getElementById('tsUrl').value.trim();
+            if (!url) { log('ERROR: No URL provided'); return; }
+            startPlayer(url);
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            e.target.classList.remove('dragover');
+            var file = e.dataTransfer.files[0];
+            if (file) { handleFile(file); }
+        }
+
+        function handleFile(file) {
+            if (!file) return;
+            log('File selected: ' + file.name + ' (' + (file.size / 1024 / 1024).toFixed(2) + ' MB)');
+            if (fileObjectURL) { URL.revokeObjectURL(fileObjectURL); }
+            fileObjectURL = URL.createObjectURL(file);
+            startPlayer(fileObjectURL);
+        }
+
+        function startPlayer(url) {
+            destroyPlayer();
+            captionCount = 0;
+            document.getElementById('captionCount').textContent = '0';
+            document.getElementById('cueCount').textContent = '0';
+            document.getElementById('statusText').textContent = 'Loading...';
+
+            log('Creating player with enableCaptions: true');
+            log('URL: ' + (url.startsWith('blob:') ? '(local file)' : url));
+
+            player = mpegts.createPlayer({
+                type: 'mpegts',
+                isLive: false,
+                url: url
+            }, {
+                enableWorker: false,  // main thread for easier debugging
+                enableCaptions: true,
+                showCaptions: true,
+            });
+
+            var videoEl = document.getElementById('videoEl');
+            player.attachMediaElement(videoEl);
+
+            // Listen for caption events
+            player.on(mpegts.Events.CAPTION_DATA_ARRIVED, function(pts, data) {
+                captionCount++;
+                document.getElementById('captionCount').textContent = captionCount;
+                if (captionCount <= 20) {
+                    log('CAPTION_DATA pts=' + pts + 'ms ccCount=' + data.ccCount +
+                        ' bytes=[' + Array.from(data.ccData.slice(0, Math.min(12, data.ccData.length)))
+                        .map(function(b) { return '0x' + b.toString(16).padStart(2,'0'); }).join(',') + '...]');
+                } else if (captionCount === 21) {
+                    log('... (suppressing further caption event logs)');
+                }
+                updateCueCount();
+            });
+
+            player.on(mpegts.Events.ERROR, function(type, detail, info) {
+                log('ERROR: ' + type + ' / ' + detail);
+                document.getElementById('statusText').textContent = 'Error: ' + detail;
+            });
+
+            player.on(mpegts.Events.MEDIA_INFO, function(info) {
+                log('MEDIA_INFO: ' + info.mimeType + ' ' +
+                    (info.width || '?') + 'x' + (info.height || '?'));
+                document.getElementById('statusText').textContent = 'Playing';
+            });
+
+            player.load();
+            player.play();
+        }
+
+        function updateCueCount() {
+            var videoEl = document.getElementById('videoEl');
+            var count = 0;
+            if (videoEl.textTracks && videoEl.textTracks.length > 0) {
+                for (var i = 0; i < videoEl.textTracks.length; i++) {
+                    var track = videoEl.textTracks[i];
+                    if (track.cues) { count += track.cues.length; }
+                }
+            }
+            document.getElementById('cueCount').textContent = count;
+        }
+
+        function toggleCC() {
+            var btn = document.getElementById('btnCC');
+            var videoEl = document.getElementById('videoEl');
+            if (videoEl.textTracks && videoEl.textTracks.length > 0) {
+                var track = videoEl.textTracks[0];
+                if (track.mode === 'showing') {
+                    track.mode = 'hidden';
+                    btn.textContent = 'CC OFF';
+                    btn.classList.remove('active');
+                    log('Captions hidden');
+                } else {
+                    track.mode = 'showing';
+                    btn.textContent = 'CC ON';
+                    btn.classList.add('active');
+                    log('Captions showing');
+                }
+            } else {
+                log('No text tracks available yet');
+            }
+        }
+
+        function destroyPlayer() {
+            if (player) {
+                player.pause();
+                player.unload();
+                player.detachMediaElement();
+                player.destroy();
+                player = null;
+                log('Player destroyed');
+            }
+        }
+
+        function clearLog() {
+            document.getElementById('logBox').textContent = '';
+        }
+
+        // Periodically update cue count
+        setInterval(updateCueCount, 1000);
+
+        log('mpegts.js v' + mpegts.version + ' loaded');
+        log('CEA-608 caption support: enabled');
+        log('Ready — enter a .ts URL or drag/drop a file');
+    </script>
+</body>
+</html>

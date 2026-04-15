@@ -25,5 +25,7 @@ declare class MSEPlayer {
     set currentTime(seconds: number);
     get mediaInfo(): MediaInfo;
     get statisticsInfo(): any;
+    enableCaptions(): void;
+    disableCaptions(): void;
 }
 export default MSEPlayer;

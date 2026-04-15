@@ -1009,6 +1009,97 @@ class TSDemuxer extends BaseDemuxer {
         }
     }
 
+    private removeEmulationPreventionBytes(data: Uint8Array): Uint8Array {
+        let dst = new Uint8Array(data.byteLength);
+        let dstIdx = 0;
+        for (let i = 0; i < data.byteLength; i++) {
+            if (i + 2 < data.byteLength && data[i] === 0x00 && data[i + 1] === 0x00 && data[i + 2] === 0x03) {
+                dst[dstIdx++] = 0x00;
+                dst[dstIdx++] = 0x00;
+                i += 2; // skip the 0x03 byte
+            } else {
+                dst[dstIdx++] = data[i];
+            }
+        }
+        return dst.subarray(0, dstIdx);
+    }
+
+    private extractCEA608FromSEI(seiData: Uint8Array): { ccData: Uint8Array, ccCount: number } | null {
+        const rbsp = this.removeEmulationPreventionBytes(seiData);
+        let offset = 1; // skip NAL header byte for H.264
+        while (offset < rbsp.length - 1) {
+            let payloadType = 0;
+            while (offset < rbsp.length && rbsp[offset] === 0xFF) {
+                payloadType += 255; offset++;
+            }
+            if (offset >= rbsp.length) break;
+            payloadType += rbsp[offset++];
+
+            let payloadSize = 0;
+            while (offset < rbsp.length && rbsp[offset] === 0xFF) {
+                payloadSize += 255; offset++;
+            }
+            if (offset >= rbsp.length) break;
+            payloadSize += rbsp[offset++];
+
+            if (payloadType === 4 && payloadSize >= 9) { // user_data_registered_itu_t_t35
+                const countryCode = rbsp[offset];
+                const providerCode = (rbsp[offset + 1] << 8) | rbsp[offset + 2];
+                if (countryCode === 0xB5 && providerCode === 0x0031) {
+                    const uid = String.fromCharCode(
+                        rbsp[offset + 3], rbsp[offset + 4],
+                        rbsp[offset + 5], rbsp[offset + 6]
+                    );
+                    if (uid === 'GA94' && rbsp[offset + 7] === 0x03) {
+                        const ccCount = rbsp[offset + 8] & 0x1F;
+                        const ccBytes = rbsp.subarray(offset + 8, offset + 9 + ccCount * 3);
+                        return { ccData: ccBytes, ccCount };
+                    }
+                }
+            }
+            offset += payloadSize;
+        }
+        return null;
+    }
+
+    private extractCEA608FromH265SEI(seiData: Uint8Array): { ccData: Uint8Array, ccCount: number } | null {
+        const rbsp = this.removeEmulationPreventionBytes(seiData);
+        let offset = 2; // skip 2-byte NAL header for H.265
+        while (offset < rbsp.length - 1) {
+            let payloadType = 0;
+            while (offset < rbsp.length && rbsp[offset] === 0xFF) {
+                payloadType += 255; offset++;
+            }
+            if (offset >= rbsp.length) break;
+            payloadType += rbsp[offset++];
+
+            let payloadSize = 0;
+            while (offset < rbsp.length && rbsp[offset] === 0xFF) {
+                payloadSize += 255; offset++;
+            }
+            if (offset >= rbsp.length) break;
+            payloadSize += rbsp[offset++];
+
+            if (payloadType === 4 && payloadSize >= 9) {
+                const countryCode = rbsp[offset];
+                const providerCode = (rbsp[offset + 1] << 8) | rbsp[offset + 2];
+                if (countryCode === 0xB5 && providerCode === 0x0031) {
+                    const uid = String.fromCharCode(
+                        rbsp[offset + 3], rbsp[offset + 4],
+                        rbsp[offset + 5], rbsp[offset + 6]
+                    );
+                    if (uid === 'GA94' && rbsp[offset + 7] === 0x03) {
+                        const ccCount = rbsp[offset + 8] & 0x1F;
+                        const ccBytes = rbsp.subarray(offset + 8, offset + 9 + ccCount * 3);
+                        return { ccData: ccBytes, ccCount };
+                    }
+                }
+            }
+            offset += payloadSize;
+        }
+        return null;
+    }
+
     private parseH264Payload(data: Uint8Array, pts: number, dts: number, file_position: number, random_access_indicator: number) {
         let annexb_parser = new H264AnnexBParser(data);
         let nalu_payload: H264NaluPayload = null;
@@ -1047,6 +1138,12 @@ class TSDemuxer extends BaseDemuxer {
             } else if (nalu_avc1.type === H264NaluType.kSliceNonIDR && random_access_indicator === 1) {
                 // For open-gop stream, use random_access_indicator to identify keyframe
                 keyframe = true;
+            } else if (nalu_avc1.type === H264NaluType.kSliceSEI) {
+                const ccResult = this.extractCEA608FromSEI(nalu_payload.data);
+                if (ccResult && this.onCaptionData) {
+                    let pts_ms_caption = Math.floor(pts / this.timescale_);
+                    this.onCaptionData(pts_ms_caption, ccResult);
+                }
             }
 
             // Push samples to remuxer only if initialization metadata has been dispatched
@@ -1127,6 +1224,13 @@ class TSDemuxer extends BaseDemuxer {
                 }
             } else if (nalu_hvc1.type === H265NaluType.kSliceIDR_W_RADL || nalu_hvc1.type === H265NaluType.kSliceIDR_N_LP || nalu_hvc1.type === H265NaluType.kSliceCRA_NUT) {
                 keyframe = true;
+            } else if ((nalu_payload.type as number) === 39 || (nalu_payload.type as number) === 40) {
+                // H.265 PREFIX_SEI (39) or SUFFIX_SEI (40)
+                const ccResult = this.extractCEA608FromH265SEI(nalu_payload.data);
+                if (ccResult && this.onCaptionData) {
+                    let pts_ms_caption = Math.floor(pts / this.timescale_);
+                    this.onCaptionData(pts_ms_caption, ccResult);
+                }
             }
 
             // Push samples to remuxer only if initialization metadata has been dispatched
