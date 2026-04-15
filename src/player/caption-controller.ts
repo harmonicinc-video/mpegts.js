@@ -54,7 +54,7 @@ export default class CaptionController {
         if (!this._debugCount) { this._debugCount = 0; }
         if (this._debugCount < 10) {
             const hex = Array.from(data.ccData).map(b => '0x' + b.toString(16).padStart(2, '0')).join(',');
-            Log.v(this.TAG, `CC_DEBUG #${this._debugCount} pts=${pts_ms.toFixed(0)}ms ccCount=${data.ccCount} len=${data.ccData.length} bytes=[${hex}]`);
+            console.warn(`CC_DEBUG #${this._debugCount} pts=${pts_ms.toFixed(0)}ms ccCount=${data.ccCount} len=${data.ccData.length} bytes=[${hex}]`);
             this._debugCount++;
         }
 
