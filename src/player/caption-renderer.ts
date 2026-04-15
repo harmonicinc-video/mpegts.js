@@ -1,20 +1,16 @@
 /**
  * CaptionRenderer
  *
- * DOM-based caption renderer inspired by Shaka Player's UITextDisplayer.
- * Creates a styled overlay on top of the video element instead of using
- * the browser's native VTTCue/TextTrack rendering.
+ * DOM-based caption renderer using a live display model (like VLC).
+ * Instead of timed cues, it simply shows "what the current text is"
+ * and updates it whenever the decoder state changes.
  */
 export default class CaptionRenderer {
     private _container: HTMLDivElement;
-    private _videoElement: HTMLMediaElement;
-    private _cues: RenderedCue[] = [];
-    private _rafId: number = 0;
-    private _visible: boolean = true;
+    private _textElement: HTMLDivElement;
+    private _currentText: string = '';
 
     constructor(videoElement: HTMLMediaElement) {
-        this._videoElement = videoElement;
-
         // Create overlay container positioned over the video
         this._container = document.createElement('div');
         this._container.className = 'mpegts-caption-container';
@@ -27,144 +23,75 @@ export default class CaptionRenderer {
             flexDirection: 'column',
             justifyContent: 'flex-end',
             alignItems: 'center',
-            paddingBottom: '5%',
-            zIndex: '2147483647',  // max z-index to be on top
+            paddingBottom: '8%',  // above typical lower-thirds
+            zIndex: '2147483647',
         });
 
-        // Ensure the parent container has relative positioning
+        // The single text display element
+        this._textElement = document.createElement('div');
+        Object.assign(this._textElement.style, {
+            textAlign: 'center',
+            maxWidth: '80%',
+            transition: 'opacity 0.1s ease',
+        });
+        this._container.appendChild(this._textElement);
+
+        // Insert into the video's parent
         const parent = videoElement.parentElement;
         if (parent) {
-            const parentPos = getComputedStyle(parent).position;
-            if (parentPos === 'static') {
-                parent.style.position = 'relative';
-            }
+            const pos = getComputedStyle(parent).position;
+            if (pos === 'static') parent.style.position = 'relative';
             parent.appendChild(this._container);
         }
-
-        // Start the update loop
-        this._tick = this._tick.bind(this);
-        this._startLoop();
     }
 
-    /** Add a caption cue to the renderer */
-    addCue(startTime: number, endTime: number, text: string): void {
-        const cue: RenderedCue = { startTime, endTime, text, element: null };
-        this._cues.push(cue);
+    /** Update the displayed text (live display model). */
+    setText(text: string): void {
+        if (text === this._currentText) return;
+        this._currentText = text;
 
-        // Limit total cues to prevent memory buildup
-        while (this._cues.length > 100) {
-            const old = this._cues.shift();
-            if (old?.element?.parentNode) {
-                old.element.parentNode.removeChild(old.element);
-            }
-        }
-    }
+        // Clear existing content
+        this._textElement.innerHTML = '';
 
-    /** Set visibility */
-    setVisible(visible: boolean): void {
-        this._visible = visible;
-        this._container.style.display = visible ? 'flex' : 'none';
-    }
-
-    /** Clear all cues */
-    clear(): void {
-        for (const cue of this._cues) {
-            if (cue.element?.parentNode) {
-                cue.element.parentNode.removeChild(cue.element);
-            }
-        }
-        this._cues = [];
-    }
-
-    /** Destroy the renderer */
-    destroy(): void {
-        if (this._rafId) {
-            cancelAnimationFrame(this._rafId);
-            this._rafId = 0;
-        }
-        this.clear();
-        if (this._container.parentNode) {
-            this._container.parentNode.removeChild(this._container);
-        }
-        this._videoElement = null;
-    }
-
-    private _startLoop(): void {
-        this._rafId = requestAnimationFrame(this._tick);
-    }
-
-    private _tick(): void {
-        if (!this._videoElement) return;
-        this._updateCues();
-        this._rafId = requestAnimationFrame(this._tick);
-    }
-
-    private _updateCues(): void {
-        const ct = this._videoElement.currentTime;
-
-        for (const cue of this._cues) {
-            const shouldShow = ct >= cue.startTime && ct < cue.endTime;
-
-            if (shouldShow && !cue.element) {
-                // Create and show the cue element
-                cue.element = this._createCueElement(cue.text);
-                this._container.appendChild(cue.element);
-            } else if (!shouldShow && cue.element) {
-                // Remove the cue element
-                if (cue.element.parentNode) {
-                    cue.element.parentNode.removeChild(cue.element);
-                }
-                cue.element = null;
-            }
-        }
-
-        // Purge old cues that have ended and are no longer needed
-        const cutoff = ct - 30;  // keep 30s of history
-        while (this._cues.length > 0 && this._cues[0].endTime < cutoff) {
-            const old = this._cues.shift();
-            if (old?.element?.parentNode) {
-                old.element.parentNode.removeChild(old.element);
-            }
-        }
-    }
-
-    private _createCueElement(text: string): HTMLDivElement {
-        const wrapper = document.createElement('div');
-        Object.assign(wrapper.style, {
-            textAlign: 'center',
-            marginBottom: '2px',
-            maxWidth: '80%',
-        });
+        if (!text) return;
 
         const lines = text.split('\n');
         for (let i = 0; i < lines.length; i++) {
-            if (i > 0) wrapper.appendChild(document.createElement('br'));
+            if (i > 0) this._textElement.appendChild(document.createElement('br'));
             const span = document.createElement('span');
             span.textContent = lines[i];
             Object.assign(span.style, {
-                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                backgroundColor: 'rgba(0, 0, 0, 0.75)',
                 color: '#FFFFFF',
-                fontFamily: '"Courier New", Courier, monospace',
-                fontSize: '1.3em',
-                fontWeight: '600',
-                padding: '2px 8px',
-                lineHeight: '1.4',
+                fontFamily: 'Consolas, "Courier New", Courier, monospace',
+                fontSize: 'clamp(16px, 2.2vw, 28px)',
+                fontWeight: '500',
+                padding: '3px 10px',
+                lineHeight: '1.5',
+                letterSpacing: '0.03em',
                 whiteSpace: 'pre-wrap',
-                textShadow: '1px 1px 2px rgba(0,0,0,0.9)',
-                borderRadius: '2px',
+                textShadow: '1px 1px 3px rgba(0,0,0,1)',
+                borderRadius: '3px',
                 display: 'inline',
                 boxDecorationBreak: 'clone',
                 WebkitBoxDecorationBreak: 'clone',
             });
-            wrapper.appendChild(span);
+            this._textElement.appendChild(span);
         }
-        return wrapper;
     }
-}
 
-interface RenderedCue {
-    startTime: number;
-    endTime: number;
-    text: string;
-    element: HTMLDivElement | null;
+    setVisible(visible: boolean): void {
+        this._container.style.display = visible ? 'flex' : 'none';
+    }
+
+    clear(): void {
+        this._currentText = '';
+        this._textElement.innerHTML = '';
+    }
+
+    destroy(): void {
+        if (this._container.parentNode) {
+            this._container.parentNode.removeChild(this._container);
+        }
+    }
 }

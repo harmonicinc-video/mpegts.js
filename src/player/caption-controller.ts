@@ -12,7 +12,6 @@ import CaptionOutputFilter from './caption-output-filter';
 import CaptionRenderer from './caption-renderer';
 import { Cea708Byte, DtvccPacketBuilder, DTVCC_PACKET_DATA, DTVCC_PACKET_START } from './cea/dtvcc-packet';
 import { Cea708Service } from './cea/cea708-service';
-import { Cea708Caption } from './cea/cea708-window';
 
 export default class CaptionController {
     private TAG: string = 'CaptionController';
@@ -92,18 +91,18 @@ export default class CaptionController {
                             const svc = this._cea708_services.get(serviceNum)!;
                             const startPos = pkt.getPosition();
                             while (pkt.getPosition() - startPos < blockSize) {
-                                const captions = svc.handleCea708ControlCode(pkt);
-                                for (const cap of captions) {
-                                    this.addCea708Cue(cap);
-                                }
+                                svc.handleCea708ControlCode(pkt);
                             }
                         }
                     }
                 } catch (e) {
-                    // Invalid packet — skip it
+                    // Invalid packet — skip
                 }
             }
             this._dtvcc_builder.clearBuiltPackets();
+
+            // Live display: read current visible window text
+            this._updateLiveDisplay();
         }
 
         // --- CEA-608 path (only if no DTVCC data in stream) ---
@@ -168,10 +167,15 @@ export default class CaptionController {
         return { field1, field2, cea708 };
     }
 
-    /** Add a CEA-708 caption to the DOM renderer */
-    private addCea708Cue(caption: Cea708Caption): void {
-        if (!this._renderer || !caption.text) return;
-        this._renderer.addCue(caption.startTime, caption.endTime, caption.text);
+    /** Update the renderer with current visible text from all 708 services. */
+    private _updateLiveDisplay(): void {
+        if (!this._renderer) return;
+        const parts: string[] = [];
+        for (const svc of this._cea708_services.values()) {
+            const t = svc.getDisplayText();
+            if (t) parts.push(t);
+        }
+        this._renderer.setText(parts.join('\n'));
     }
 
     enableCaptions(): void {

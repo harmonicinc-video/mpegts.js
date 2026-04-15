@@ -54,6 +54,17 @@ export class Cea708Service {
         this.windows = [null, null, null, null, null, null, null, null];
     }
 
+    /** Get combined text from all visible windows (live display). */
+    getDisplayText(): string {
+        const parts: string[] = [];
+        for (const w of this.windows) {
+            if (!w) continue;
+            const t = w.getDisplayText();
+            if (t) parts.push(t);
+        }
+        return parts.join('\n');
+    }
+
     // --- Character groups ---
 
     private handleG0(cc: number): void {

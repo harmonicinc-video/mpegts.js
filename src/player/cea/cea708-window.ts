@@ -133,4 +133,19 @@ export class Cea708Window {
     hide(): void { this.visible = false; }
     toggle(): void { this.visible = !this.visible; }
     setStartTime(pts: number): void { this.startTime = pts; }
+
+    /** Get the current visible text in this window (live display). */
+    getDisplayText(): string {
+        if (!this.visible) return '';
+        const lines: string[] = [];
+        for (let i = 0; i < this.rowCount; i++) {
+            let rowText = '';
+            for (let j = 0; j < this.colCount; j++) {
+                rowText += this.memory[i][j] || '';
+            }
+            const trimmed = rowText.trim();
+            if (trimmed) lines.push(trimmed);
+        }
+        return lines.join('\n');
+    }
 }
