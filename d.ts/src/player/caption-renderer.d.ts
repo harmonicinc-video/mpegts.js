@@ -10,12 +10,19 @@ export default class CaptionRenderer {
     private _textElement;
     private _videoElement;
     private _currentText;
+    private _onFullscreenChange;
     constructor(videoElement: HTMLMediaElement);
     /** Update the displayed text (live display model). */
     setText(text: string): void;
     setVisible(visible: boolean): void;
     clear(): void;
     destroy(): void;
+    /**
+     * Recalculate font size when entering/exiting fullscreen.
+     * The consumer is responsible for fullscreening the video's parent
+     * container (Shaka Player pattern) so the overlay stays visible.
+     */
+    private _handleFullscreenChange;
     /**
      * Compute font size based on video container height.
      * CEA-708 defines 15 rows; each row ~5.33% of height (like Shaka).

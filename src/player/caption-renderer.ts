@@ -10,6 +10,7 @@ export default class CaptionRenderer {
     private _textElement: HTMLDivElement;
     private _videoElement: HTMLMediaElement;
     private _currentText: string = '';
+    private _onFullscreenChange: (() => void) | null = null;
 
     constructor(videoElement: HTMLMediaElement) {
         this._videoElement = videoElement;
@@ -38,13 +39,18 @@ export default class CaptionRenderer {
         });
         this._container.appendChild(this._textElement);
 
-        // Insert into the video's parent
+        // Insert into the video's parent (consumer should fullscreen this parent)
         const parent = videoElement.parentElement;
         if (parent) {
             const pos = getComputedStyle(parent).position;
             if (pos === 'static') parent.style.position = 'relative';
             parent.appendChild(this._container);
         }
+
+        // Recalculate font size when entering/exiting fullscreen
+        this._onFullscreenChange = this._handleFullscreenChange.bind(this);
+        document.addEventListener('fullscreenchange', this._onFullscreenChange);
+        document.addEventListener('webkitfullscreenchange', this._onFullscreenChange);
     }
 
     /** Update the displayed text (live display model). */
@@ -92,10 +98,29 @@ export default class CaptionRenderer {
     }
 
     destroy(): void {
+        if (this._onFullscreenChange) {
+            document.removeEventListener('fullscreenchange', this._onFullscreenChange);
+            document.removeEventListener('webkitfullscreenchange', this._onFullscreenChange);
+            this._onFullscreenChange = null;
+        }
         if (this._container.parentNode) {
             this._container.parentNode.removeChild(this._container);
         }
         this._videoElement = null;
+    }
+
+    /**
+     * Recalculate font size when entering/exiting fullscreen.
+     * The consumer is responsible for fullscreening the video's parent
+     * container (Shaka Player pattern) so the overlay stays visible.
+     */
+    private _handleFullscreenChange(): void {
+        // Re-render current text with updated font size
+        if (this._currentText) {
+            const saved = this._currentText;
+            this._currentText = '';
+            this.setText(saved);
+        }
     }
 
     /**
