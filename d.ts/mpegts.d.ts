@@ -226,6 +226,12 @@ declare namespace Mpegts {
          * @desc Should implement `BaseLoader` interface
          */
         customLoader?: CustomLoaderConstructor;
+
+        /**
+         * @desc Enable CEA-608/708 closed-caption rendering via CaptionController.
+         * @defaultvalue false
+         */
+        enableCaptions?: boolean;
     }
 
     interface CustomSeekHandlerConstructor {
