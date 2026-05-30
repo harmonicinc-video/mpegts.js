@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+    <title>mpegts.js DVB TTML Subtitle Test</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+               background: #1a1a2e; color: #eee; padding: 20px; }
+        h1 { color: #4ecca3; margin-bottom: 16px; font-size: 24px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        .url-bar { display: flex; gap: 8px; margin-bottom: 16px; }
+        .url-bar input { flex: 1; padding: 10px; border-radius: 6px; border: 1px solid #333;
+                         background: #16213e; color: #eee; font-size: 14px; }
+        .url-bar button { padding: 10px 20px; border-radius: 6px; border: none;
+                          background: #4ecca3; color: #03110c; cursor: pointer; font-weight: 700; }
+        .live-toggle { display: flex; align-items: center; gap: 5px; color: #ccc;
+                       font-size: 13px; white-space: nowrap; cursor: pointer;
+                       padding: 0 6px; user-select: none; }
+        .live-toggle input { cursor: pointer; }
+
+        /* Video + custom control bar (mirrors vos-ai-console VideoPreview: no
+           native <video controls>, custom bar overlaid on the video, fullscreen
+           targets the container so the caption overlay stays visible). */
+        .video-wrap { position: relative; background: #000; border-radius: 8px;
+                      overflow: hidden; margin-bottom: 16px; }
+        video { width: 100%; display: block; cursor: pointer; }
+        .control-bar { position: absolute; left: 0; right: 0; bottom: 0;
+                       display: flex; align-items: center; gap: 8px;
+                       padding: 8px 10px 10px; z-index: 2147483646;
+                       background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
+                       opacity: 0; transition: opacity 0.15s ease; }
+        .video-wrap:hover .control-bar, .control-bar.show { opacity: 1; }
+        .ctrl-btn { background: transparent; border: none; color: #fff; cursor: pointer;
+                    padding: 6px 9px; border-radius: 5px; font-size: 14px; font-weight: 700;
+                    line-height: 1; }
+        .ctrl-btn:hover { background: rgba(255,255,255,0.2); }
+        .ctrl-btn.active { color: #4ecca3; }
+        .time { color: #ddd; font-size: 12px; font-variant-numeric: tabular-nums;
+                font-family: monospace; min-width: 38px; text-align: center; }
+
+        /* Seek / progress bar */
+        .seek { flex: 1; height: 5px; -webkit-appearance: none; appearance: none;
+                background: rgba(255,255,255,0.25); border-radius: 3px; cursor: pointer; outline: none; }
+        .seek::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
+                width: 13px; height: 13px; border-radius: 50%; background: #4ecca3;
+                border: none; cursor: pointer; box-shadow: 0 0 3px rgba(0,0,0,0.6); }
+        .seek::-moz-range-thumb { width: 13px; height: 13px; border-radius: 50%;
+                background: #4ecca3; border: none; cursor: pointer; }
+        .seek:disabled { opacity: 0.5; cursor: default; }
+
+        /* CC popup menu (player-style submenu) */
+        .cc-wrap { position: relative; }
+        .cc-menu { position: absolute; bottom: 44px; right: 0; min-width: 210px;
+                   background: rgba(18,20,32,0.97); border: 1px solid #2a2f45;
+                   border-radius: 8px; padding: 6px; z-index: 2147483647;
+                   box-shadow: 0 8px 28px rgba(0,0,0,0.55); }
+        .cc-menu[hidden] { display: none; }
+        .cc-title { color: #7c84a3; font-size: 11px; text-transform: uppercase;
+                    letter-spacing: 0.06em; padding: 6px 10px 8px; }
+        .cc-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+                   border-radius: 6px; cursor: pointer; color: #eee; font-size: 13px; }
+        .cc-item:hover { background: #0f3460; }
+        .cc-item.active { color: #4ecca3; font-weight: 700; }
+        .cc-item .check { width: 14px; display: inline-block; text-align: center; }
+        .cc-empty { padding: 8px 10px; color: #666; font-size: 13px; font-style: italic; }
+
+        .controls { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+        .controls button { padding: 8px 16px; border-radius: 6px; border: 1px solid #333;
+                           background: #16213e; color: #eee; cursor: pointer; }
+        .controls button:hover { background: #0f3460; }
+        .status { padding: 8px 12px; background: #16213e; border-radius: 6px;
+                  margin-bottom: 16px; font-size: 13px; }
+        .status span { color: #4ecca3; font-weight: 600; }
+        .log { background: #0a0a1a; border: 1px solid #333; border-radius: 6px;
+               padding: 12px; font-family: monospace; font-size: 12px; color: #88ddaa;
+               height: 240px; overflow-y: auto; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌐 mpegts.js DVB TTML Subtitle Test (ETSI EN 303 560)</h1>
+
+        <div class="url-bar">
+            <input id="tsUrl" type="text"
+                   placeholder="MPEG-TS / HTTP-FLV URL (e.g. https://…/stream.ts?token=…)" />
+            <label class="live-toggle" title="Low-latency live mode with auto-resync (like the vos-ai-console preview)">
+                <input type="checkbox" id="liveMode" /> Live
+            </label>
+            <button onclick="loadUrl()">Load URL</button>
+            <input id="fileInput" type="file" accept=".ts,.mts,.m2ts,.flv,video/*"
+                   style="display:none" onchange="loadFile(this)" />
+            <button onclick="document.getElementById('fileInput').click()">Open file…</button>
+        </div>
+
+        <!-- Custom control bar overlay (no native controls), like the console -->
+        <div class="video-wrap" id="videoWrap">
+            <video id="videoEl" autoplay muted onclick="togglePlay()"></video>
+            <div class="control-bar" id="controlBar">
+                <button class="ctrl-btn" id="playBtn" title="Play / pause"
+                        onclick="togglePlay()">▶</button>
+                <span class="time" id="curTime">0:00</span>
+                <input type="range" class="seek" id="seekBar" min="0" max="0" value="0" step="0.1" disabled />
+                <span class="time" id="durTime">0:00</span>
+                <div class="cc-wrap">
+                    <button class="ctrl-btn" id="ccBtn" title="Captions / subtitles"
+                            onclick="toggleCCMenu(event)">Subtitles</button>
+                    <div class="cc-menu" id="ccMenu" hidden></div>
+                </div>
+                <button class="ctrl-btn" id="muteBtn" title="Mute / unmute"
+                        onclick="toggleMute()">🔇</button>
+                <button class="ctrl-btn" id="fsBtn" title="Fullscreen"
+                        onclick="toggleFullscreen()">⛶</button>
+            </div>
+        </div>
+
+        <div class="status">
+            TTML events: <span id="evtCount">0</span> |
+            Active track: <span id="activePid">—</span> |
+            Status: <span id="statusText">Ready</span>
+        </div>
+
+        <div class="controls">
+            <button onclick="clearLog()">Clear Log</button>
+            <button onclick="destroyPlayer()">Destroy</button>
+        </div>
+
+        <div class="log" id="logBox"></div>
+    </div>
+
+    <script src="../dist/mpegts.js"></script>
+    <script>
+        var player = null;
+        var evtCount = 0;
+        var knownPids = {};
+        var objectUrl = null;   // tracks the blob: URL for an opened local file
+        var session = null;     // { url, isLive, retries, maxRetries, timer }
+        var tearingDown = false; // suppress live resync during intentional teardown
+
+        function log(msg) {
+            var box = document.getElementById('logBox');
+            var ts = new Date().toISOString().substr(11, 12);
+            box.textContent += '[' + ts + '] ' + msg + '\n';
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function loadUrl() {
+            var url = document.getElementById('tsUrl').value.trim();
+            if (!url) { log('ERROR: No URL provided'); return; }
+            var isLive = document.getElementById('liveMode').checked;
+            startPlayer(url, { isLive: isLive });
+        }
+
+        // Play a file picked from disk — no server needed; mpegts.js fetches the
+        // blob: URL just like any other source. Always VOD.
+        function loadFile(input) {
+            var f = input.files && input.files[0];
+            if (!f) { return; }
+            log('Opening local file: ' + f.name + ' (' + (f.size / 1e6).toFixed(1) + ' MB)');
+            startPlayer(URL.createObjectURL(f), { isLive: false });
+            input.value = '';   // allow re-picking the same file later
+        }
+
+        function startPlayer(url, opts) {
+            opts = opts || {};
+            destroyPlayer();
+            objectUrl = url.indexOf('blob:') === 0 ? url : null;
+            // Live session state (drives the resync/retry loop, mirroring the
+            // vos-ai-console preview which plays the SRT-sourced tap as live
+            // MPEG-TS over HTTP).
+            session = { url: url, isLive: !!opts.isLive, retries: 0, maxRetries: 8, timer: null };
+            evtCount = 0; knownPids = {};
+            document.getElementById('evtCount').textContent = '0';
+            document.getElementById('activePid').textContent = '—';
+            document.getElementById('statusText').textContent = 'Loading...';
+            refreshTracks();
+
+            log('Creating ' + (session.isLive ? 'LIVE' : 'VOD') + ' player (enableCaptions: true)');
+            log('URL: ' + url);
+            buildPlayer();
+        }
+
+        // (Re)create the mpegts.js player for the current session — called on
+        // start and on each resync attempt.
+        function buildPlayer() {
+            if (!session) { return; }
+            var isLive = session.isLive;
+
+            // Config mirrors vos-ai-console/web/src/components/VideoPreview.tsx:
+            // continuous pull at the live edge, no latency chasing, bounded
+            // backward buffer cleanup.
+            var config = isLive ? {
+                enableWorker: false,   // caption/TTML controllers run in the main-thread engine
+                enableCaptions: true,
+                showCaptions: true,
+                lazyLoad: false,
+                enableStashBuffer: false,
+                liveBufferLatencyChasing: false,
+                deferLoadAfterSourceOpen: false,
+                autoCleanupSourceBuffer: true,
+                autoCleanupMaxBackwardDuration: 30,
+                autoCleanupMinBackwardDuration: 20,
+            } : {
+                enableWorker: false,
+                enableCaptions: true,
+                showCaptions: true,
+            };
+
+            player = mpegts.createPlayer({ type: 'mpegts', isLive: isLive, url: session.url }, config);
+
+            var videoEl = document.getElementById('videoEl');
+            player.attachMediaElement(videoEl);
+
+            player.on(mpegts.Events.DVB_TTML_SUBTITLE_ARRIVED, function(data) {
+                evtCount++;
+                document.getElementById('evtCount').textContent = evtCount;
+                var types = (data.segments || []).map(function(s){ return '0x'+s.type.toString(16); }).join(',');
+                if (!knownPids[data.pid]) {
+                    knownPids[data.pid] = data.lang;
+                    log('NEW TTML stream: PID=' + data.pid + ' lang=' + data.lang);
+                    refreshTracks();
+                }
+                if (evtCount <= 30) {
+                    log('TTML pid=' + data.pid + ' lang=' + data.lang +
+                        ' pts=' + (data.pts/1000).toFixed(3) + 's' +
+                        ' seg_mediatime=' + data.segment_mediatime +
+                        ' segs=[' + types + ']');
+                } else if (evtCount === 31) {
+                    log('... (suppressing further per-event logs)');
+                }
+                document.getElementById('activePid').textContent = player.getActiveCaptionTrack() || '—';
+            });
+
+            player.on(mpegts.Events.CAPTION_DATA_ARRIVED, function() {
+                // CEA-608/708 present → make sure the unified list shows it.
+                refreshTracks();
+            });
+
+            player.on(mpegts.Events.ERROR, function(type, detail, info) {
+                log('ERROR: ' + type + ' / ' + detail);
+                if (session && session.isLive) {
+                    var isNetwork = (detail && (detail.indexOf('fetch') >= 0 || detail.indexOf('network') >= 0))
+                                  || /network/i.test(type || '');
+                    scheduleRetry(isNetwork ? 'network' : 'other');
+                } else {
+                    document.getElementById('statusText').textContent = 'Error: ' + detail;
+                }
+            });
+
+            player.on(mpegts.Events.MEDIA_INFO, function(info) {
+                if (session) { session.retries = 0; }   // a successful sync clears the retry budget
+                log('MEDIA_INFO: ' + info.mimeType + ' ' + (info.width||'?') + 'x' + (info.height||'?'));
+                document.getElementById('statusText').textContent = session && session.isLive ? 'LIVE' : 'Playing';
+            });
+
+            player.load();
+            player.play().catch(function(){});
+        }
+
+        // Live resync: tear down the player and rebuild after a short delay,
+        // up to a bounded number of attempts (matches the console behavior).
+        function scheduleRetry(reason) {
+            if (!session || !session.isLive) { return; }
+            if (session.retries >= session.maxRetries) {
+                document.getElementById('statusText').textContent = reason === 'network'
+                    ? 'Cannot connect — ensure the live source is active'
+                    : 'Decode error — could not sync to keyframe';
+                log('Giving up after ' + session.maxRetries + ' attempts (' + reason + ')');
+                return;
+            }
+            if (session.timer) { clearTimeout(session.timer); session.timer = null; }
+            session.retries++;
+            document.getElementById('statusText').textContent =
+                'Syncing to keyframe (attempt ' + session.retries + '/' + session.maxRetries + ')…';
+            log('Resync attempt ' + session.retries + '/' + session.maxRetries + ' (' + reason + ')');
+            destroyPlayerInstance();
+            session.timer = setTimeout(function() {
+                if (session) { buildPlayer(); }
+            }, 2000);
+        }
+
+        // --- In-player CC menu (driven entirely by the mpegts.js track API) ---
+
+        function refreshTracks() {
+            var menu = document.getElementById('ccMenu');
+            var ccBtn = document.getElementById('ccBtn');
+            var tracks = player ? player.getCaptionTracks() : [];
+            var active = player ? player.getActiveCaptionTrack() : null;
+
+            // Unified list: Off + CEA-608/708 (if present) + each DVB TTML language.
+            var entries = [{ id: 'off', label: 'Off' }].concat(tracks);
+
+            menu.innerHTML = '';
+            var title = document.createElement('div');
+            title.className = 'cc-title';
+            title.textContent = 'Subtitles / CC';
+            menu.appendChild(title);
+
+            if (!tracks.length) {
+                var empty = document.createElement('div');
+                empty.className = 'cc-empty';
+                empty.textContent = player ? '(discovering…)' : '(load a stream)';
+                menu.appendChild(empty);
+            }
+
+            entries.forEach(function(t) {
+                var isActive = (t.id === active) || (active == null && t.id === 'off');
+                var item = document.createElement('div');
+                item.className = 'cc-item' + (isActive ? ' active' : '');
+                item.innerHTML = '<span class="check">' + (isActive ? '✓' : '') + '</span>'
+                               + '<span>' + t.label + '</span>';
+                item.onclick = function() {
+                    if (!player) { return; }
+                    player.setCaptionTrack(t.id);
+                    log('Selected caption track: ' + t.label + ' (' + t.id + ')');
+                    document.getElementById('activePid').textContent = t.id;
+                    refreshTracks();
+                    closeCCMenu();
+                };
+                menu.appendChild(item);
+            });
+
+            // CC button glows green when a real track (not "off") is showing.
+            var on = !!active && active !== 'off';
+            ccBtn.classList.toggle('active', on);
+        }
+
+        function toggleCCMenu(e) {
+            if (e) { e.stopPropagation(); }
+            var menu = document.getElementById('ccMenu');
+            var open = menu.hasAttribute('hidden');
+            if (open) {
+                refreshTracks();
+                menu.removeAttribute('hidden');
+                document.getElementById('controlBar').classList.add('show');
+            } else {
+                closeCCMenu();
+            }
+        }
+
+        function closeCCMenu() {
+            document.getElementById('ccMenu').setAttribute('hidden', '');
+            document.getElementById('controlBar').classList.remove('show');
+        }
+
+        // Close the menu when clicking anywhere else.
+        document.addEventListener('click', function(e) {
+            var wrap = document.querySelector('.cc-wrap');
+            if (wrap && !wrap.contains(e.target)) { closeCCMenu(); }
+        });
+
+        function togglePlay() {
+            var v = document.getElementById('videoEl');
+            if (!v) { return; }
+            if (v.paused) { v.play().catch(function(){}); } else { v.pause(); }
+        }
+
+        function toggleMute() {
+            var v = document.getElementById('videoEl');
+            if (!v) { return; }
+            v.muted = !v.muted;
+            document.getElementById('muteBtn').textContent = v.muted ? '🔇' : '🔊';
+        }
+
+        function fmtTime(s) {
+            if (!isFinite(s) || s < 0) { return '0:00'; }
+            var m = Math.floor(s / 60);
+            var sec = Math.floor(s % 60);
+            return m + ':' + (sec < 10 ? '0' : '') + sec;
+        }
+
+        // Bind playback UI to the (persistent) <video> element once.
+        (function bindPlaybackControls() {
+            var v = document.getElementById('videoEl');
+            var playBtn = document.getElementById('playBtn');
+            var seek = document.getElementById('seekBar');
+            var cur = document.getElementById('curTime');
+            var dur = document.getElementById('durTime');
+            var seeking = false;
+
+            v.addEventListener('play', function() { playBtn.textContent = '⏸'; });
+            v.addEventListener('pause', function() { playBtn.textContent = '▶'; });
+            v.addEventListener('ended', function() { playBtn.textContent = '▶'; });
+            // Live decode errors (e.g. couldn't sync to a keyframe) → resync.
+            v.addEventListener('error', function() {
+                if (!tearingDown && session && session.isLive) { scheduleRetry('decode'); }
+            });
+
+            function refreshDuration() {
+                if (isFinite(v.duration) && v.duration > 0) {
+                    seek.max = v.duration;
+                    seek.disabled = false;
+                    dur.textContent = fmtTime(v.duration);
+                } else {
+                    // Live / unknown duration → seek bar inactive.
+                    seek.disabled = true;
+                    dur.textContent = 'LIVE';
+                }
+            }
+            v.addEventListener('loadedmetadata', refreshDuration);
+            v.addEventListener('durationchange', refreshDuration);
+
+            v.addEventListener('timeupdate', function() {
+                cur.textContent = fmtTime(v.currentTime);
+                if (!seeking && !seek.disabled) { seek.value = v.currentTime; }
+            });
+
+            // Scrub: update time label live while dragging, seek on commit.
+            seek.addEventListener('input', function() {
+                seeking = true;
+                cur.textContent = fmtTime(parseFloat(seek.value));
+            });
+            seek.addEventListener('change', function() {
+                v.currentTime = parseFloat(seek.value);
+                seeking = false;
+            });
+        })();
+
+        function toggleFullscreen() {
+            // Fullscreen the container (not the <video>) so the caption overlay
+            // and control bar stay visible — the same pattern the console uses.
+            var wrap = document.getElementById('videoWrap');
+            if (document.fullscreenElement) {
+                document.exitFullscreen();
+            } else if (wrap.requestFullscreen) {
+                wrap.requestFullscreen();
+            }
+        }
+
+        // Tear down only the mpegts.js instance (used by the live resync loop).
+        function destroyPlayerInstance() {
+            tearingDown = true;
+            if (player) {
+                try { player.pause(); player.unload(); player.detachMediaElement(); player.destroy(); }
+                catch (e) { /* may already be partially destroyed */ }
+                player = null;
+            }
+            tearingDown = false;
+        }
+
+        // Full stop: end the session, drop the player, revoke any blob URL.
+        function destroyPlayer() {
+            if (session && session.timer) { clearTimeout(session.timer); }
+            var had = !!player;
+            destroyPlayerInstance();
+            session = null;
+            if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+            if (had) { log('Player destroyed'); }
+            refreshTracks();
+        }
+
+        function clearLog() { document.getElementById('logBox').textContent = ''; }
+
+        log('mpegts.js v' + mpegts.version + ' loaded — DVB TTML test ready');
+        log('Open a local .ts file, or enter a URL (tick "Live" for a low-latency live tap like the console).');
+        log('Then hover the video and click "Subtitles" to pick a track.');
+    </script>
+</body>
+</html>

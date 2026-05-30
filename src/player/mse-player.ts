@@ -141,16 +141,55 @@ class MSEPlayer {
         return this._player_engine.statisticsInfo;
     }
 
+    private get _caption_manager(): any {
+        return this._player_engine && (this._player_engine as any)._caption_manager;
+    }
+
     public enableCaptions(): void {
-        if (this._player_engine && (this._player_engine as any)._caption_controller) {
-            (this._player_engine as any)._caption_controller.enableCaptions();
-        }
+        if (this._caption_manager) { this._caption_manager.enableCaptions(); }
     }
 
     public disableCaptions(): void {
-        if (this._player_engine && (this._player_engine as any)._caption_controller) {
-            (this._player_engine as any)._caption_controller.disableCaptions();
+        if (this._caption_manager) { this._caption_manager.disableCaptions(); }
+    }
+
+    // --- Unified caption/subtitle track selection (CEA-608/708 + DVB TTML) ---
+
+    // Returns the selectable tracks: { id, type: 'cea'|'ttml', label, lang?, pid? }.
+    public getCaptionTracks(): { id: string, type: string, label: string, lang?: string, pid?: number }[] {
+        const mgr = this._caption_manager;
+        return mgr ? mgr.getTracks() : [];
+    }
+
+    // Active track id ('cea' | 'ttml:<pid>' | 'off'), or null before any data.
+    public getActiveCaptionTrack(): string | null {
+        const mgr = this._caption_manager;
+        return mgr ? mgr.getActiveTrack() : null;
+    }
+
+    // Select a track by id, or 'off'/null to render nothing.
+    public setCaptionTrack(id: string | null): void {
+        const mgr = this._caption_manager;
+        if (mgr) { mgr.setActiveTrack(id); }
+    }
+
+    // --- DVB TTML subtitle track selection (legacy helpers, kept for compat) ---
+    public getTTMLTracks(): { pid: number, lang: string }[] {
+        return this.getCaptionTracks()
+            .filter((t) => t.type === 'ttml')
+            .map((t) => ({ pid: t.pid as number, lang: t.lang as string }));
+    }
+
+    public getActiveTTMLPID(): number | null {
+        const active = this.getActiveCaptionTrack();
+        if (active && active.indexOf('ttml:') === 0) {
+            return parseInt(active.substring('ttml:'.length), 10);
         }
+        return null;
+    }
+
+    public setTTMLTrack(pid: number): void {
+        this.setCaptionTrack(`ttml:${pid}`);
     }
 
 }

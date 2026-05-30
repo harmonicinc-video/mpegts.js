@@ -20,6 +20,10 @@ export default class CaptionController {
     private _cea608_parser2: Cea608Parser;   // field 2 (CC3/CC4)
     private _text_track: TextTrack | null = null;
     private _renderer: CaptionRenderer | null = null;
+    // When the renderer is shared (managed by CaptionTrackManager), this
+    // controller must not destroy it, and only writes to it while selected.
+    private _owns_renderer: boolean = true;
+    private _render_active: boolean = true;
 
     // CEA-708 DTVCC
     private _dtvcc_builder: DtvccPacketBuilder;
@@ -30,7 +34,8 @@ export default class CaptionController {
 
     constructor(
         mediaElement: HTMLMediaElement,
-        config: any
+        config: any,
+        sharedRenderer?: CaptionRenderer
     ) {
         this._media_element = mediaElement;
 
@@ -38,9 +43,16 @@ export default class CaptionController {
         this._text_track = mediaElement.addTextTrack('captions', 'English', 'en');
         this._text_track.mode = 'hidden';  // always hidden — we use CaptionRenderer
 
-        // DOM-based caption renderer (VLC-quality rendering)
-        this._renderer = new CaptionRenderer(mediaElement);
-        this._renderer.setVisible(config.showCaptions !== false);
+        // DOM-based caption renderer (VLC-quality rendering). When a shared
+        // renderer is supplied by CaptionTrackManager, reuse it so CEA and DVB
+        // TTML never stack two overlays; the manager owns its lifecycle.
+        if (sharedRenderer) {
+            this._renderer = sharedRenderer;
+            this._owns_renderer = false;
+        } else {
+            this._renderer = new CaptionRenderer(mediaElement);
+            this._renderer.setVisible(config.showCaptions !== false);
+        }
 
         // CEA-608: OutputFilter bridges parser → TextTrack (VTTCue)
         const filter1 = new CaptionOutputFilter(this._text_track);
@@ -169,7 +181,7 @@ export default class CaptionController {
 
     /** Check if any service needs a display refresh (VLC-style batching). */
     private _checkNeedsDisplay(): void {
-        if (!this._renderer) return;
+        if (!this._renderer || !this._render_active) return;
         let needsUpdate = false;
         const services = Array.from(this._cea708_services) as any[];
         for (let i = 0; i < services.length; i++) {
@@ -197,6 +209,20 @@ export default class CaptionController {
         if (this._renderer) { this._renderer.setVisible(false); }
     }
 
+    /**
+     * Select/deselect this controller as the visible track. When inactive it
+     * keeps decoding (so CEA state stays current) but stops writing to the
+     * shared renderer. Used by CaptionTrackManager.
+     */
+    setRenderingActive(active: boolean): void {
+        this._render_active = active;
+        if (active) {
+            // Re-show whatever the services currently hold.
+            this._cea708_services.forEach((svc: any) => { svc.needsDisplay = true; });
+            this._checkNeedsDisplay();
+        }
+    }
+
     reset(): void {
         if (this._cea608_parser1) { this._cea608_parser1.reset(); }
         if (this._cea608_parser2) { this._cea608_parser2.reset(); }
@@ -213,7 +239,10 @@ export default class CaptionController {
         this._dtvcc_builder = null;
         this._cea708_services = null;
         this._text_track = null;
-        if (this._renderer) { this._renderer.destroy(); this._renderer = null; }
+        // Only destroy the renderer if we own it; a shared renderer is owned by
+        // CaptionTrackManager.
+        if (this._renderer && this._owns_renderer) { this._renderer.destroy(); }
+        this._renderer = null;
         this._media_element = null;
     }
 }

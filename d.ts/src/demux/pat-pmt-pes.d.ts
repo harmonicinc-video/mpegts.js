@@ -51,6 +51,12 @@ export declare class PMT {
     pgs_langs: {
         [pid: number]: string;
     };
+    dvb_ttml_pids: {
+        [pid: number]: boolean;
+    };
+    dvb_ttml_langs: {
+        [pid: number]: string;
+    };
     synchronous_klv_pids: {
         [pid: number]: boolean;
     };

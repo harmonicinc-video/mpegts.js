@@ -97,6 +97,8 @@ In multipart mode, `duration` `filesize` `url` field in `MediaDataSource` struct
 | `reuseRedirectedURL?`            | `boolean` | `false`                      | Reuse 301/302 redirected url for subsequence request like seek, reconnect, etc. |
 | `referrerPolicy?`                | `string`  | `no-referrer-when-downgrade` | Indicates the [Referrer Policy][] when using FetchStreamLoader |
 | `headers?`                       | `object`  | `undefined`                  | Indicates additional headers that will be added to request |
+| `enableCaptions?`                | `boolean` | `false`                      | Decode and render in-band subtitles/captions: CEA-608/708 (carried in the video stream) and DVB TTML (ETSI EN 303 560). Rendered as a plain-text overlay; selectable via the caption track API on the player. |
+| `showCaptions?`                  | `boolean` | `true`                       | Initial visibility of the caption overlay when `enableCaptions` is set. Toggle at runtime with `enableCaptions()` / `disableCaptions()`. |
 
 
 [Referrer Policy]: https://w3c.github.io/webappsec-referrer-policy/#referrer-policy
@@ -158,6 +160,13 @@ interface Player {
     unload(): void;
     play(): Promise<void>;
     pause(): void;
+    // Caption / subtitle overlay (requires config.enableCaptions). Covers
+    // CEA-608/708 and DVB TTML through one shared overlay and track list.
+    enableCaptions(): void;
+    disableCaptions(): void;
+    getCaptionTracks(): { id: string, type: string, label: string, lang?: string, pid?: number }[];
+    getActiveCaptionTrack(): string | null;   // 'cea' | 'ttml:<pid>' | 'off' | null (before data)
+    setCaptionTrack(id: string | null): void; // track id, or 'off'/null to render nothing
     type: string;
     buffered: TimeRanges;
     duration: number;
@@ -204,6 +213,8 @@ A series of constants that can be used with `Player.on()` / `Player.off()`. They
 | SCRIPTDATA_ARRIVED         | Provides scriptdata (OnCuePoint / OnTextData) which FLV file(stream) can contain. |
 | TIMED_ID3_METADATA_ARRIVED | Provides Timed ID3 Metadata packets containing private data (stream_type=0x15) callback |
 | PGS_SUBTITLE_ARRIVED       | Provides PGS Subtitle data (stream_type=0x90) callback |
+| CAPTION_DATA_ARRIVED       | Provides CEA-608/708 caption data extracted from the video stream callback |
+| DVB_TTML_SUBTITLE_ARRIVED  | Provides DVB TTML subtitle data (ETSI EN 303 560, stream_type=0x06 with the TTML subtitling descriptor) callback |
 | SYNCHRONOUS_KLV_METADATA_ARRIVED  |  Provides Synchronous KLV Metadata packets containing private data (stream_type=0x15) callback |
 | ASYNCHRONOUS_KLV_METADATA_ARRIVED |  Provides Asynchronous KLV Metadata packets containing private data (stream_type=0x06) callback |
 | SMPTE2038_METADATA_ARRIVED | Provides SMPTE2038 Metadata packets containing private data callback |
