@@ -232,6 +232,13 @@ declare namespace Mpegts {
          * @defaultvalue false
          */
         enableCaptions?: boolean;
+
+        /**
+         * @desc Initial visibility of the caption/subtitle overlay when enableCaptions is set.
+         *       Toggle at runtime with enableCaptions()/disableCaptions().
+         * @defaultvalue true
+         */
+        showCaptions?: boolean;
     }
 
     interface CustomSeekHandlerConstructor {
@@ -444,6 +451,7 @@ declare namespace Mpegts {
         TIMED_ID3_METADATA_ARRIVED: string;
         PGS_SUBTITLE_ARRIVED: string;
         DVB_TTML_SUBTITLE_ARRIVED: string;
+        CAPTION_DATA_ARRIVED: string;
         SYNCHRONOUS_KLV_METADATA_ARRIVED: string;
         ASYNCHRONOUS_KLV_METADATA_ARRIVED: string;
         SMPTE2038_METADATA_ARRIVED: string;
