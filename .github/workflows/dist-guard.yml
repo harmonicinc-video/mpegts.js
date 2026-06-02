@@ -1,0 +1,39 @@
+# Guards against a stale committed dist/.
+#
+# This fork ships its built bundle in-repo (dist/ is committed, not gitignored)
+# because consumers install it as a git dependency under `ignore-scripts=true`,
+# where npm never runs the build. There is intentionally no `prepare` hook, so
+# nothing rebuilds dist/ automatically — if someone edits src/ and forgets to
+# rebuild, the stale bundle ships silently (this is exactly how DVB-TTML support
+# went missing once). This job rebuilds from src/ and fails if the committed
+# dist/ does not match, forcing `npm run build` + commit.
+name: dist-guard
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  verify-dist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Pin the toolchain so the rebuild reproduces the committed bytes.
+          # Maintainers should build dist/ with this Node major version.
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Verify committed dist/ matches a fresh build
+        run: |
+          if ! git diff --exit-code -- dist/; then
+            echo "::error::dist/ is out of date with src/. Run 'npm run build' and commit the updated dist/ (this fork has no prepare hook, so it is not rebuilt on install)."
+            exit 1
+          fi
