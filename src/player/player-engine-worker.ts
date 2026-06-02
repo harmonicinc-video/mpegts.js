@@ -255,6 +255,9 @@ const PlayerEngineWorker = (self: DedicatedWorkerGlobalScope) => {
         transmuxer.on(TransmuxingEvents.PGS_SUBTITLE_ARRIVED, (pgs_data: any) => {
             emitPlayerEventsExtraData(PlayerEvents.PGS_SUBTITLE_ARRIVED, pgs_data);
         });
+        transmuxer.on(TransmuxingEvents.DVB_TTML_SUBTITLE_ARRIVED, (ttml_data: any) => {
+            emitPlayerEventsExtraData(PlayerEvents.DVB_TTML_SUBTITLE_ARRIVED, ttml_data);
+        });
         transmuxer.on(TransmuxingEvents.SYNCHRONOUS_KLV_METADATA_ARRIVED, (synchronous_klv_metadata: any) => {
             emitPlayerEventsExtraData(PlayerEvents.SYNCHRONOUS_KLV_METADATA_ARRIVED, synchronous_klv_metadata);
         });

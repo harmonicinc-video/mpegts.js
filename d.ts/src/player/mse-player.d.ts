@@ -25,7 +25,23 @@ declare class MSEPlayer {
     set currentTime(seconds: number);
     get mediaInfo(): MediaInfo;
     get statisticsInfo(): any;
+    private get _caption_manager();
     enableCaptions(): void;
     disableCaptions(): void;
+    getCaptionTracks(): {
+        id: string;
+        type: string;
+        label: string;
+        lang?: string;
+        pid?: number;
+    }[];
+    getActiveCaptionTrack(): string | null;
+    setCaptionTrack(id: string | null): void;
+    getTTMLTracks(): {
+        pid: number;
+        lang: string;
+    }[];
+    getActiveTTMLPID(): number | null;
+    setTTMLTrack(pid: number): void;
 }
 export default MSEPlayer;

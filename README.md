@@ -58,6 +58,7 @@ mpegts.js works by transmuxing MPEG2-TS stream into ISO BMFF (Fragmented MP4) se
 - Support chasing latency automatically for internal buffer of HTMLMediaElement
 - Low CPU overhead and low memory usage (JS heap takes about 10MiB for each instance)
 - Support extracting PES private data (stream_type=0x06) like ARIB B24 subtitles (with [aribb24.js][])
+- Support in-band CEA-608/708 closed captions and DVB TTML subtitles (ETSI EN 303 560) with a built-in text overlay and track selection (`enableCaptions`)
 - Support Timed ID3 Metadata (stream_type=0x15) callback (TIMED_ID3_METADATA_ARRIVED)
 
 [aribb24.js]: https://github.com/monyone/aribb24.js

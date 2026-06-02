@@ -327,6 +327,22 @@ declare namespace Mpegts {
         unload(): void;
         play(): Promise<void> | void;
         pause(): void;
+        enableCaptions?(): void;
+        disableCaptions?(): void;
+        /**
+         * List the selectable caption/subtitle tracks, unifying CEA-608/708
+         * (id 'cea') and DVB TTML (id 'ttml:<pid>', one per language).
+         */
+        getCaptionTracks?(): { id: string, type: string, label: string, lang?: string, pid?: number }[];
+        /** Active track id ('cea' | 'ttml:<pid>' | 'off'), or null before data arrives. */
+        getActiveCaptionTrack?(): string | null;
+        /** Select a track by id, or 'off'/null to render nothing. */
+        setCaptionTrack?(id: string | null): void;
+        /** List discovered DVB TTML subtitle streams (legacy; prefer getCaptionTracks). */
+        getTTMLTracks?(): { pid: number, lang: string }[];
+        getActiveTTMLPID?(): number | null;
+        /** Switch the displayed DVB TTML subtitle stream by PID (legacy; prefer setCaptionTrack). */
+        setTTMLTrack?(pid: number): void;
         type: string;
         buffered: TimeRanges;
         duration: number;
@@ -427,6 +443,7 @@ declare namespace Mpegts {
         SCRIPTDATA_ARRIVED: string;
         TIMED_ID3_METADATA_ARRIVED: string;
         PGS_SUBTITLE_ARRIVED: string;
+        DVB_TTML_SUBTITLE_ARRIVED: string;
         SYNCHRONOUS_KLV_METADATA_ARRIVED: string;
         ASYNCHRONOUS_KLV_METADATA_ARRIVED: string;
         SMPTE2038_METADATA_ARRIVED: string;

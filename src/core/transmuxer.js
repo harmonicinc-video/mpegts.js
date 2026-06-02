@@ -68,6 +68,7 @@ class Transmuxer {
             ctl.on(TransmuxingEvents.SMPTE2038_METADATA_ARRIVED, this._onSMPTE2038MetadataArrived.bind(this));
             ctl.on(TransmuxingEvents.SCTE35_METADATA_ARRIVED, this._onSCTE35MetadataArrived.bind(this));
             ctl.on(TransmuxingEvents.CAPTION_DATA_ARRIVED, this._onCaptionDataArrived.bind(this));
+            ctl.on(TransmuxingEvents.DVB_TTML_SUBTITLE_ARRIVED, this._onDVBTTMLSubtitleArrived.bind(this));
             ctl.on(TransmuxingEvents.PES_PRIVATE_DATA_DESCRIPTOR, this._onPESPrivateDataDescriptor.bind(this));
             ctl.on(TransmuxingEvents.PES_PRIVATE_DATA_ARRIVED, this._onPESPrivateDataArrived.bind(this));
             ctl.on(TransmuxingEvents.STATISTICS_INFO, this._onStatisticsInfo.bind(this));
@@ -198,6 +199,12 @@ class Transmuxer {
         });
     }
 
+    _onDVBTTMLSubtitleArrived (data) {
+        Promise.resolve().then(() => {
+            this._emitter.emit(TransmuxingEvents.DVB_TTML_SUBTITLE_ARRIVED, data);
+        });
+    }
+
     _onSynchronousKLVMetadataArrived (data) {
         Promise.resolve().then(() => {
             this._emitter.emit(TransmuxingEvents.SYNCHRONOUS_KLV_METADATA_ARRIVED, data);
@@ -298,6 +305,7 @@ class Transmuxer {
             case TransmuxingEvents.SCRIPTDATA_ARRIVED:
             case TransmuxingEvents.TIMED_ID3_METADATA_ARRIVED:
             case TransmuxingEvents.PGS_SUBTITLE_ARRIVED:
+            case TransmuxingEvents.DVB_TTML_SUBTITLE_ARRIVED:
             case TransmuxingEvents.SYNCHRONOUS_KLV_METADATA_ARRIVED:
             case TransmuxingEvents.ASYNCHRONOUS_KLV_METADATA_ARRIVED:
             case TransmuxingEvents.SMPTE2038_METADATA_ARRIVED:

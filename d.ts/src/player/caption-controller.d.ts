@@ -1,3 +1,4 @@
+import CaptionRenderer from './caption-renderer';
 export default class CaptionController {
     private TAG;
     private _media_element;
@@ -5,11 +6,13 @@ export default class CaptionController {
     private _cea608_parser2;
     private _text_track;
     private _renderer;
+    private _owns_renderer;
+    private _render_active;
     private _dtvcc_builder;
     private _cea708_services;
     private _cea708_order;
     private _has_dtvcc_data;
-    constructor(mediaElement: HTMLMediaElement, config: any);
+    constructor(mediaElement: HTMLMediaElement, config: any, sharedRenderer?: CaptionRenderer);
     /**
      * Called when CAPTION_DATA_ARRIVED fires.
      * @param pts_ms PTS in milliseconds (already rebased)
@@ -28,6 +31,12 @@ export default class CaptionController {
     private _checkNeedsDisplay;
     enableCaptions(): void;
     disableCaptions(): void;
+    /**
+     * Select/deselect this controller as the visible track. When inactive it
+     * keeps decoding (so CEA state stays current) but stops writing to the
+     * shared renderer. Used by CaptionTrackManager.
+     */
+    setRenderingActive(active: boolean): void;
     reset(): void;
     destroy(): void;
 }

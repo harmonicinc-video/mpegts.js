@@ -89,6 +89,7 @@ declare class TSDemuxer extends BaseDemuxer {
     private parsePESPrivateDataPayload;
     private parseTimedID3MetadataPayload;
     private parsePGSPayload;
+    private parseDVBTTMLPayload;
     private parseSynchronousKLVMetadataPayload;
     private parseAsynchronousKLVMetadataPayload;
     private parseSMPTE2038MetadataPayload;

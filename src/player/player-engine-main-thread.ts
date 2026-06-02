@@ -33,7 +33,7 @@ import LoadingController from './loading-controller';
 import StartupStallJumper from './startup-stall-jumper';
 import LiveLatencyChaser from './live-latency-chaser';
 import LiveLatencySynchronizer from './live-latency-synchronizer';
-import CaptionController from './caption-controller';
+import CaptionTrackManager from './caption-track-manager';
 
 class PlayerEngineMainThread implements PlayerEngine {
 
@@ -55,7 +55,7 @@ class PlayerEngineMainThread implements PlayerEngine {
     private _startup_stall_jumper?: StartupStallJumper = null;
     private _live_latency_chaser?: LiveLatencyChaser = null;
     private _live_latency_synchronizer?: LiveLatencySynchronizer = null;
-    private _caption_controller?: CaptionController = null;
+    private _caption_manager?: CaptionTrackManager = null;
 
     private _mse_source_opened: boolean = false;
     private _has_pending_load: boolean = false;
@@ -236,6 +236,12 @@ class PlayerEngineMainThread implements PlayerEngine {
         this._transmuxer.on(TransmuxingEvents.PGS_SUBTITLE_ARRIVED, (pgs_data: any) => {
             this._emitter.emit(PlayerEvents.PGS_SUBTITLE_ARRIVED, pgs_data);
         });
+        this._transmuxer.on(TransmuxingEvents.DVB_TTML_SUBTITLE_ARRIVED, (ttml_data: any) => {
+            this._emitter.emit(PlayerEvents.DVB_TTML_SUBTITLE_ARRIVED, ttml_data);
+            if (this._caption_manager) {
+                this._caption_manager.onDVBTTMLData(ttml_data);
+            }
+        });
         this._transmuxer.on(TransmuxingEvents.SYNCHRONOUS_KLV_METADATA_ARRIVED, (synchronous_klv_metadata: any) => {
             this._emitter.emit(PlayerEvents.SYNCHRONOUS_KLV_METADATA_ARRIVED, synchronous_klv_metadata);
         });
@@ -250,8 +256,8 @@ class PlayerEngineMainThread implements PlayerEngine {
         });
         this._transmuxer.on(TransmuxingEvents.CAPTION_DATA_ARRIVED, (pts: number, data: any) => {
             this._emitter.emit(PlayerEvents.CAPTION_DATA_ARRIVED, pts, data);
-            if (this._caption_controller) {
-                this._caption_controller.onCaptionData(pts, data);
+            if (this._caption_manager) {
+                this._caption_manager.onCaptionData(pts, data);
             }
         });
         this._transmuxer.on(TransmuxingEvents.PES_PRIVATE_DATA_DESCRIPTOR, (descriptor: any) => {
@@ -302,9 +308,10 @@ class PlayerEngineMainThread implements PlayerEngine {
 
         this._transmuxer.open();
 
-        // Initialize CaptionController if captions are enabled
+        // Initialize the unified caption/subtitle track manager (CEA-608/708 +
+        // DVB TTML, sharing one overlay) if captions are enabled.
         if (this._config.enableCaptions && this._media_element) {
-            this._caption_controller = new CaptionController(
+            this._caption_manager = new CaptionTrackManager(
                 this._media_element,
                 this._config
             );
@@ -335,8 +342,8 @@ class PlayerEngineMainThread implements PlayerEngine {
         this._transmuxer?.destroy();
         this._transmuxer = null;
 
-        this._caption_controller?.destroy();
-        this._caption_controller = null;
+        this._caption_manager?.destroy();
+        this._caption_manager = null;
     }
 
     public play(): Promise<void> {

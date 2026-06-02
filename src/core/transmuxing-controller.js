@@ -324,6 +324,7 @@ class TransmuxingController {
         demuxer.onMetaDataArrived = this._onMetaDataArrived.bind(this);
         demuxer.onTimedID3Metadata = this._onTimedID3Metadata.bind(this);
         demuxer.onPGSSubtitleData = this._onPGSSubtitle.bind(this);
+        demuxer.onDVBTTMLSubtitleData = this._onDVBTTMLSubtitle.bind(this);
         demuxer.onSynchronousKLVMetadata = this._onSynchronousKLVMetadata.bind(this);
         demuxer.onAsynchronousKLVMetadata = this._onAsynchronousKLVMetadata.bind(this);
         demuxer.onSMPTE2038Metadata = this._onSMPTE2038Metadata.bind(this);
@@ -401,6 +402,21 @@ class TransmuxingController {
         }
 
         this._emitter.emit(TransmuxingEvents.PGS_SUBTITLE_ARRIVED, pgs_data);
+    }
+
+    _onDVBTTMLSubtitle(ttml_data) {
+        let timestamp_base = this._remuxer.getTimestampBase();
+        if (timestamp_base == undefined) { return; }
+
+        if (ttml_data.pts != undefined) {
+            ttml_data.pts -= timestamp_base;
+        }
+
+        if (ttml_data.dts != undefined) {
+            ttml_data.dts -= timestamp_base;
+        }
+
+        this._emitter.emit(TransmuxingEvents.DVB_TTML_SUBTITLE_ARRIVED, ttml_data);
     }
 
     _onSynchronousKLVMetadata(synchronous_klv_metadata) {

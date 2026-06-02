@@ -59,7 +59,7 @@ export const defaultConfig = {
     headers: undefined,
     customLoader: undefined,
 
-    enableCaptions: false,
+    enableCaptions: false,  // enables CEA-608/708 and DVB TTML subtitle decoding/rendering
     showCaptions: true,
 };
 

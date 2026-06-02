@@ -37,6 +37,7 @@ import { KLVData, klv_parse } from './klv';
 import AV1OBUInMpegTsParser from './av1';
 import AV1OBUParser from './av1-parser';
 import { PGSData } from './pgs-data';
+import { DVBTTMLData, DVBTTMLSegment } from './dvb-ttml-data';
 
 type AdaptationFieldInfo = {
     discontinuity_indicator?: number;
@@ -355,6 +356,7 @@ class TSDemuxer extends BaseDemuxer {
                             || this.pmt_.pes_private_data_pids[pid] === true
                             || this.pmt_.timed_id3_pids[pid] === true
                             || this.pmt_.pgs_pids[pid] === true
+                            || this.pmt_.dvb_ttml_pids[pid] === true
                             || this.pmt_.synchronous_klv_pids[pid] === true
                             || this.pmt_.asynchronous_klv_pids[pid] === true
                             ) {
@@ -616,6 +618,8 @@ class TSDemuxer extends BaseDemuxer {
                         this.parseAsynchronousKLVMetadataPayload(payload, pes_data.pid, stream_id);
                     } else if (this.pmt_.smpte2038_pids[pes_data.pid]) {
                         this.parseSMPTE2038MetadataPayload(payload, pts, dts, pes_data.pid, stream_id);
+                    } else if (this.pmt_.dvb_ttml_pids[pes_data.pid]) {
+                        this.parseDVBTTMLPayload(payload, pts, dts, pes_data.pid, stream_id, this.pmt_.dvb_ttml_langs[pes_data.pid]);
                     } else {
                         this.parsePESPrivateDataPayload(payload, pts, dts, pes_data.pid, stream_id);
                     }
@@ -822,8 +826,11 @@ class TSDemuxer extends BaseDemuxer {
                                 pmt.asynchronous_klv_pids[elementary_PID] = true;
                             }
                         } else if (tag === 0x7F) {  // DVB extension descriptor
-                            if (elementary_PID === pmt.common_pids.opus) {
-                                let ext_desc_tag = data[offset + 2];
+                            let ext_desc_tag = data[offset + 2];
+                            if (ext_desc_tag === 0x20) {  // TTML subtitling descriptor (ETSI EN 303 560 §5.2.1.1)
+                                pmt.dvb_ttml_pids[elementary_PID] = true;
+                                pmt.dvb_ttml_langs[elementary_PID] = String.fromCharCode(... Array.from(data.subarray(offset + 3, offset + 6)));
+                            } else if (elementary_PID === pmt.common_pids.opus) {
                                 let channel_config_code: number | null = null;
                                 if (ext_desc_tag === 0x80) { // User defined (provisional Opus)
                                     channel_config_code = data[offset + 3];
@@ -2149,6 +2156,57 @@ class TSDemuxer extends BaseDemuxer {
 
         if (this.onPGSSubtitleData) {
             this.onPGSSubtitleData(pgs_data);
+        }
+    }
+
+    // DVB TTML subtitling PES_data_field (ETSI EN 303 560 §5.2.2.2.1)
+    private parseDVBTTMLPayload(data: Uint8Array, pts: number, dts: number, pid: number, stream_id: number, lang: string) {
+        // Minimum: 48-bit segment_mediatime + 8-bit num_of_segments + 32-bit CRC
+        if (data.byteLength < 11) { return; }
+
+        let ttml_data = new DVBTTMLData();
+        ttml_data.pid = pid;
+        ttml_data.lang = lang;
+        ttml_data.stream_id = stream_id;
+
+        if (pts != undefined) {
+            ttml_data.pts = Math.floor(pts / this.timescale_);
+        }
+        if (dts != undefined) {
+            ttml_data.dts = Math.floor(dts / this.timescale_);
+        }
+
+        // segment_mediatime: 48-bit unsigned (units of 100 microseconds).
+        // Use floating-point arithmetic to read beyond 32 bits.
+        ttml_data.segment_mediatime =
+            (data[0] * 0x10000000000) +
+            (data[1] * 0x100000000) +
+            (data[2] * 0x1000000) +
+            (data[3] * 0x10000) +
+            (data[4] * 0x100) +
+            (data[5]);
+
+        let num_of_segments = data[6];
+        let offset = 7;
+        for (let i = 0; i < num_of_segments; i++) {
+            if (offset + 3 > data.byteLength) { break; }
+            let segment_type = data[offset];
+            let segment_length = (data[offset + 1] << 8) | data[offset + 2];
+            offset += 3;
+            if (offset + segment_length > data.byteLength) { break; }
+            let segment_data = data.subarray(offset, offset + segment_length);
+            offset += segment_length;
+
+            // Only TTML document segments (0x01 uncompressed, 0x02 gzip) are of interest.
+            if (segment_type === 0x01 || segment_type === 0x02) {
+                ttml_data.segments.push({ type: segment_type, data: segment_data } as DVBTTMLSegment);
+            }
+        }
+
+        if (ttml_data.segments.length === 0) { return; }
+
+        if (this.onDVBTTMLSubtitleData) {
+            this.onDVBTTMLSubtitleData(ttml_data);
         }
     }
 
