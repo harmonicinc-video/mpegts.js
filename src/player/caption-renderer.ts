@@ -4,13 +4,37 @@
  * DOM-based caption renderer using a live display model (like VLC).
  * Instead of timed cues, it simply shows "what the current text is"
  * and updates it whenever the decoder state changes.
+ *
+ * Live ASR roll-up captions update frequently and grow word-by-word. To keep
+ * the preview legible, three things are done here:
+ *
+ *   1. Repaint throttle: rapid setText() calls are coalesced (REPAINT_THROTTLE_MS)
+ *      so the overlay never repaints faster than it can be read.
+ *   2. In-place diff: line rows are reused and only their text/font-size is
+ *      patched, instead of tearing down and rebuilding the block on every
+ *      update — this removes the per-update flash.
+ *   3. Scroll animation: when the window rolls up, the block slides up briefly
+ *      so the roll-up reads as scrolling motion rather than an instant text swap.
  */
 export default class CaptionRenderer {
     private _container: HTMLDivElement;
     private _textElement: HTMLDivElement;
     private _videoElement: HTMLMediaElement;
+    /** Last text handed to setText() (pre-throttle) — used to skip no-op updates. */
     private _currentText: string = '';
+    /** Last text actually painted to the DOM. */
+    private _renderedText: string | null = null;
+    /** Reusable per-line row elements (stable DOM across updates). */
+    private _lineRows: HTMLDivElement[] = [];
+    /** Lines painted on the previous render — used to detect roll-up. */
+    private _prevLines: string[] = [];
     private _onFullscreenChange: (() => void) | null = null;
+
+    // ── Repaint throttle ──────────────────────────────────────────────
+    /** Coalesce decoder updates to at most one repaint per this interval. */
+    private static readonly REPAINT_THROTTLE_MS = 180;
+    private _flushTimer: ReturnType<typeof setTimeout> | null = null;
+    private _pendingText: string | null = null;
 
     constructor(videoElement: HTMLMediaElement) {
         this._videoElement = videoElement;
@@ -30,12 +54,17 @@ export default class CaptionRenderer {
             zIndex: '2147483647',
         });
 
-        // The single text display element
+        // The caption block: a bottom-anchored, centered column of line rows.
+        // Pinning the block at flex-end means new lines extend it upward while
+        // its bottom edge stays fixed — natural roll-up behavior with no
+        // vertical jump.
         this._textElement = document.createElement('div');
         Object.assign(this._textElement.style, {
-            textAlign: 'center',
             maxWidth: '80%',
-            transition: 'opacity 0.1s ease',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            willChange: 'transform',
         });
         this._container.appendChild(this._textElement);
 
@@ -53,39 +82,27 @@ export default class CaptionRenderer {
         document.addEventListener('webkitfullscreenchange', this._onFullscreenChange);
     }
 
-    /** Update the displayed text (live display model). */
+    /**
+     * Update the displayed text (live display model).
+     *
+     * Throttled: the call records the latest text and schedules a single
+     * repaint at most once per REPAINT_THROTTLE_MS. This is a trailing
+     * throttle — the freshest text is always the one that gets painted.
+     */
     setText(text: string): void {
         if (text === this._currentText) return;
         this._currentText = text;
+        this._pendingText = text;
 
-        // Clear existing content
-        this._textElement.innerHTML = '';
+        // A repaint is already scheduled — it will pick up _pendingText.
+        if (this._flushTimer !== null) return;
 
-        if (!text) return;
-
-        const lines = text.split('\n');
-        for (let i = 0; i < lines.length; i++) {
-            if (i > 0) this._textElement.appendChild(document.createElement('br'));
-            const span = document.createElement('span');
-            span.textContent = lines[i];
-            Object.assign(span.style, {
-                backgroundColor: 'rgba(0, 0, 0, 0.75)',
-                color: '#FFFFFF',
-                fontFamily: 'Consolas, "Courier New", Courier, monospace',
-                fontSize: this._computeFontSize() + 'px',
-                fontWeight: '500',
-                padding: '3px 10px',
-                lineHeight: '1.5',
-                letterSpacing: '0.03em',
-                whiteSpace: 'pre-wrap',
-                textShadow: '1px 1px 3px rgba(0,0,0,1)',
-                borderRadius: '3px',
-                display: 'inline',
-                boxDecorationBreak: 'clone',
-                WebkitBoxDecorationBreak: 'clone',
-            });
-            this._textElement.appendChild(span);
-        }
+        this._flushTimer = setTimeout(() => {
+            this._flushTimer = null;
+            const pending = this._pendingText;
+            this._pendingText = null;
+            if (pending !== null) this._render(pending);
+        }, CaptionRenderer.REPAINT_THROTTLE_MS);
     }
 
     setVisible(visible: boolean): void {
@@ -93,11 +110,27 @@ export default class CaptionRenderer {
     }
 
     clear(): void {
+        if (this._flushTimer !== null) {
+            clearTimeout(this._flushTimer);
+            this._flushTimer = null;
+        }
+        this._pendingText = null;
         this._currentText = '';
-        this._textElement.innerHTML = '';
+        this._renderedText = '';
+        this._prevLines = [];
+        this._textElement.style.transition = '';
+        this._textElement.style.transform = '';
+        for (const row of this._lineRows) {
+            if (row.parentNode) row.parentNode.removeChild(row);
+        }
+        this._lineRows = [];
     }
 
     destroy(): void {
+        if (this._flushTimer !== null) {
+            clearTimeout(this._flushTimer);
+            this._flushTimer = null;
+        }
         if (this._onFullscreenChange) {
             document.removeEventListener('fullscreenchange', this._onFullscreenChange);
             document.removeEventListener('webkitfullscreenchange', this._onFullscreenChange);
@@ -110,16 +143,100 @@ export default class CaptionRenderer {
     }
 
     /**
+     * Paint `text` to the DOM via an in-place diff: reuse existing line
+     * rows, add/remove rows only when the line count changes, and patch
+     * each row's text/font-size only when it actually differs. No full
+     * teardown — this is what keeps the box from flashing on every update.
+     */
+    private _render(text: string): void {
+        if (text === this._renderedText) return;
+        this._renderedText = text;
+
+        const lines = text ? text.split('\n') : [];
+        const fontSize = this._computeFontSize() + 'px';
+
+        // Roll-up detection: the top line changed to a line we were previously
+        // showing *below* it (index > 0). That is a scroll, not bottom-line
+        // growth — only then do we play the slide animation.
+        const rolledUp = this._prevLines.length > 0 && lines.length > 0
+            && lines[0] !== this._prevLines[0]
+            && this._prevLines.indexOf(lines[0]) > 0;
+
+        // Grow/shrink the row pool to match the current line count.
+        while (this._lineRows.length < lines.length) {
+            const row = this._createRow();
+            this._lineRows.push(row);
+            this._textElement.appendChild(row);
+        }
+        while (this._lineRows.length > lines.length) {
+            const row = this._lineRows.pop();
+            if (row && row.parentNode) row.parentNode.removeChild(row);
+        }
+
+        // Patch text + font size in place (only when changed).
+        for (let i = 0; i < lines.length; i++) {
+            const span = this._lineRows[i].firstElementChild as HTMLElement;
+            if (span.textContent !== lines[i]) span.textContent = lines[i];
+            if (span.style.fontSize !== fontSize) span.style.fontSize = fontSize;
+        }
+
+        this._prevLines = lines;
+        if (rolledUp) this._animateScroll();
+    }
+
+    /**
+     * Play a short upward slide so a roll-up reads as scrolling motion rather
+     * than an instant text swap. Starts the block one row lower, then animates
+     * it back to rest.
+     */
+    private _animateScroll(): void {
+        const h = this._lineRows[0] ? this._lineRows[0].offsetHeight : 0;
+        if (h <= 0) return;
+        const el = this._textElement;
+        el.style.transition = 'none';
+        el.style.transform = `translateY(${h}px)`;
+        // Force reflow so the starting transform commits before we animate.
+        void el.offsetHeight;
+        el.style.transition = 'transform 0.15s ease-out';
+        el.style.transform = 'translateY(0)';
+    }
+
+    /** Create a stable, centered line row holding one text box. */
+    private _createRow(): HTMLDivElement {
+        const row = document.createElement('div');
+        row.style.textAlign = 'center';
+
+        const span = document.createElement('span');
+        Object.assign(span.style, {
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            color: '#FFFFFF',
+            fontFamily: 'Consolas, "Courier New", Courier, monospace',
+            fontSize: this._computeFontSize() + 'px',
+            fontWeight: '500',
+            padding: '3px 10px',
+            lineHeight: '1.5',
+            letterSpacing: '0.03em',
+            whiteSpace: 'pre-wrap',
+            textShadow: '1px 1px 3px rgba(0,0,0,1)',
+            borderRadius: '3px',
+            display: 'inline-block',
+            boxDecorationBreak: 'clone',
+            WebkitBoxDecorationBreak: 'clone',
+        });
+        row.appendChild(span);
+        return row;
+    }
+
+    /**
      * Recalculate font size when entering/exiting fullscreen.
      * The consumer is responsible for fullscreening the video's parent
      * container (Shaka Player pattern) so the overlay stays visible.
      */
     private _handleFullscreenChange(): void {
-        // Re-render current text with updated font size
-        if (this._currentText) {
-            const saved = this._currentText;
-            this._currentText = '';
-            this.setText(saved);
+        const fontSize = this._computeFontSize() + 'px';
+        for (const row of this._lineRows) {
+            const span = row.firstElementChild as HTMLElement | null;
+            if (span) span.style.fontSize = fontSize;
         }
     }
 
