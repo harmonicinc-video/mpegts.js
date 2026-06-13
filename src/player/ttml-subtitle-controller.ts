@@ -268,10 +268,18 @@ export default class TTMLSubtitleController {
         if (this._media_element && this._renderer && this._render_active) {
             const now = this._media_element.currentTime;
 
+            // Show the most recently-started cue active at `now`, not the union
+            // of all active cues. Live DVB-TTML is a sequence of "intermediate
+            // synchronic documents": each document is the full screen state and
+            // a newer one supersedes the previous. Our encoder emits one
+            // multi-line <p> per roll-up window, whose hold durations overlap;
+            // unioning them would stack several windows on screen at once (the
+            // "few words, 1–3 lines, rolling fast" artifact). `_cues` is sorted
+            // by start ascending, so the last match is the latest window.
             let text = '';
             for (const cue of this._cues) {
                 if (cue.pid === this._active_pid && cue.start <= now && now < cue.end) {
-                    text = text ? text + '\n' + cue.text : cue.text;
+                    text = cue.text;
                 }
             }
 
