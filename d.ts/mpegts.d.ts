@@ -127,6 +127,24 @@ declare namespace Mpegts {
         liveSyncPlaybackRate?: number;
 
         /**
+         * @desc Adaptive liveSync: size the target/max latency band from the observed
+         *       fragment-append cadence (≈ source GOP) instead of the fixed values above.
+         *       With auto-tune on, `liveSyncTargetLatency` acts as the FLOOR (min cushion
+         *       for short-GOP sources) and `liveSyncMaxAutoLatency` as the CEILING cap, so
+         *       a long/variable GOP can't inflate latency without bound.
+         *       Effective only if `isLive: true` and `liveSync: true`
+         * @defaultvalue false
+         */
+        liveSyncAutoTune?: boolean;
+
+        /**
+         * @desc Ceiling for the adaptive liveSync latency band, in seconds.
+         *       Effective only if `isLive: true`, `liveSync: true`, and `liveSyncAutoTune: true`
+         * @defaultvalue 12
+         */
+        liveSyncMaxAutoLatency?: number;
+
+        /**
          * @desc Abort the http connection if there's enough data for playback.
          * @defaultvalue true
          */
