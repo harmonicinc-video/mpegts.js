@@ -1,4 +1,4 @@
-export type WorkerCommandOp = 'logging_config' | 'init' | 'destroy' | 'initialize_mse' | 'shutdown_mse' | 'load' | 'unload' | 'unbuffered_seek' | 'timeupdate' | 'readystatechange' | 'pause_transmuxer' | 'resume_transmuxer';
+export type WorkerCommandOp = 'logging_config' | 'init' | 'destroy' | 'initialize_mse' | 'shutdown_mse' | 'load' | 'unload' | 'unbuffered_seek' | 'timeupdate' | 'readystatechange' | 'pause_transmuxer' | 'resume_transmuxer' | 'set_audio_pid';
 export type WorkerCommandPacket = {
     cmd: WorkerCommandOp;
 };
@@ -22,4 +22,8 @@ export type WorkerCommandPacketTimeUpdate = WorkerCommandPacket & {
 export type WorkerCommandPacketReadyStateChange = WorkerCommandPacket & {
     cmd: 'readystatechange';
     ready_state: number;
+};
+export type WorkerCommandPacketSetAudioPID = WorkerCommandPacket & {
+    cmd: 'set_audio_pid';
+    pid: number;
 };

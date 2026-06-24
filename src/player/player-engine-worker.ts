@@ -33,6 +33,7 @@ import {
     WorkerCommandPacketUnbufferedSeek,
     WorkerCommandPacketTimeUpdate,
     WorkerCommandPacketReadyStateChange,
+    WorkerCommandPacketSetAudioPID,
 } from './player-engine-worker-cmd-def.js';
 import {
     WorkerMessagePacket,
@@ -129,6 +130,11 @@ const PlayerEngineWorker = (self: DedicatedWorkerGlobalScope) => {
             case 'resume_transmuxer':
                 transmuxer.resume();
                 break;
+            case 'set_audio_pid': {
+                const packet = command_packet as WorkerCommandPacketSetAudioPID;
+                (transmuxer as any)?.setAudioPID(packet.pid);
+                break;
+            }
         }
     });
 
@@ -278,6 +284,9 @@ const PlayerEngineWorker = (self: DedicatedWorkerGlobalScope) => {
         });
         transmuxer.on(TransmuxingEvents.PES_PRIVATE_DATA_ARRIVED, (private_data: any) => {
             emitPlayerEventsExtraData(PlayerEvents.PES_PRIVATE_DATA_ARRIVED, private_data);
+        });
+        transmuxer.on(TransmuxingEvents.AUDIO_TRACKS_UPDATED, (tracks: { pid: number, type: string, lang: string }[]) => {
+            emitPlayerEventsExtraData(PlayerEvents.AUDIO_TRACKS_UPDATED, tracks);
         });
 
         transmuxer.open();

@@ -13,6 +13,8 @@ declare class PlayerEngineDedicatedThread implements PlayerEngine {
     private _startup_stall_jumper?;
     private _live_latency_chaser?;
     private _live_latency_synchronizer?;
+    private _caption_manager?;
+    private _audio_tracks;
     private _pending_seek_time?;
     private _media_info?;
     private _statistics_info?;
@@ -42,6 +44,12 @@ declare class PlayerEngineDedicatedThread implements PlayerEngine {
     private _onMediaTimeUpdate;
     private _onMediaReadyStateChange;
     private _onWorkerMessage;
+    getAudioTracks(): {
+        pid: number;
+        type: string;
+        lang: string;
+    }[];
+    setAudioPID(pid: number): void;
     private _fillStatisticsInfo;
 }
 export default PlayerEngineDedicatedThread;

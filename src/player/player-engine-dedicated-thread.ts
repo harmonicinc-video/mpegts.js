@@ -31,13 +31,15 @@ import LoadingController from './loading-controller';
 import StartupStallJumper from './startup-stall-jumper';
 import LiveLatencyChaser from './live-latency-chaser';
 import LiveLatencySynchronizer from './live-latency-synchronizer';
+import CaptionTrackManager from './caption-track-manager';
 import {
     WorkerCommandPacket,
     WorkerCommandPacketInit,
     WorkerCommandPacketLoggingConfig,
     WorkerCommandPacketTimeUpdate,
     WorkerCommandPacketReadyStateChange,
-    WorkerCommandPacketUnbufferedSeek
+    WorkerCommandPacketUnbufferedSeek,
+    WorkerCommandPacketSetAudioPID
 } from './player-engine-worker-cmd-def.js';
 import {
     WorkerMessagePacket,
@@ -71,6 +73,15 @@ class PlayerEngineDedicatedThread implements PlayerEngine {
     private _startup_stall_jumper?: StartupStallJumper = null;
     private _live_latency_chaser?: LiveLatencyChaser = null;
     private _live_latency_synchronizer?: LiveLatencySynchronizer = null;
+    // Caption/subtitle rendering lives on the main thread: the transmuxer runs in
+    // the worker and relays caption data back via player_event messages, which we
+    // feed to this manager. Mirrors PlayerEngineMainThread so enableWorkerForMSE
+    // keeps captions + the caption-track API working.
+    private _caption_manager?: CaptionTrackManager = null;
+
+    // Audio elementary streams discovered by the worker's demuxer, relayed via the
+    // AUDIO_TRACKS_UPDATED player event so getAudioTracks()/setAudioPID() work.
+    private _audio_tracks: { pid: number, type: string, lang: string }[] = [];
 
     private _pending_seek_time?: number = null;
 
@@ -247,6 +258,17 @@ class PlayerEngineDedicatedThread implements PlayerEngine {
             // IE11 may throw InvalidStateError if readyState === 0
             this._seeking_handler.directSeek(0);
         }
+
+        // Initialize the unified caption/subtitle track manager (CEA-608/708 +
+        // DVB TTML, sharing one overlay) if captions are enabled. The transmuxer
+        // runs in the worker; caption data is relayed back and fed to this manager
+        // in _onWorkerMessage().
+        if (this._config.enableCaptions && this._media_element) {
+            this._caption_manager = new CaptionTrackManager(
+                this._media_element,
+                this._config
+            );
+        }
     }
 
     public unload(): void {
@@ -255,6 +277,9 @@ class PlayerEngineDedicatedThread implements PlayerEngine {
         this._worker.postMessage({
             cmd: 'unload',
         } as WorkerCommandPacket);
+
+        this._caption_manager?.destroy();
+        this._caption_manager = null;
 
         this._live_latency_synchronizer?.destroy();
         this._live_latency_synchronizer = null;
@@ -418,7 +443,22 @@ class PlayerEngineDedicatedThread implements PlayerEngine {
                     this._emitter.emit(PlayerEvents.ERROR, packet.error_type, packet.error_detail, packet.info);
                 } else if ('extraData' in packet) {
                     const packet = message_packet as WorkerMessagePacketPlayerEventExtraData;
-                    this._emitter.emit(packet.event, packet.extraData);
+                    if (packet.event == PlayerEvents.CAPTION_DATA_ARRIVED) {
+                        // The worker packs CEA-608/708 caption as { pts, data }; unpack to
+                        // match the main-thread engine's (pts, data) listener signature and
+                        // feed the caption renderer (which only exists on the main thread).
+                        const { pts, data } = packet.extraData;
+                        this._emitter.emit(PlayerEvents.CAPTION_DATA_ARRIVED, pts, data);
+                        this._caption_manager?.onCaptionData(pts, data);
+                    } else if (packet.event == PlayerEvents.DVB_TTML_SUBTITLE_ARRIVED) {
+                        this._emitter.emit(PlayerEvents.DVB_TTML_SUBTITLE_ARRIVED, packet.extraData);
+                        this._caption_manager?.onDVBTTMLData(packet.extraData);
+                    } else if (packet.event == PlayerEvents.AUDIO_TRACKS_UPDATED) {
+                        this._audio_tracks = packet.extraData;
+                        this._emitter.emit(PlayerEvents.AUDIO_TRACKS_UPDATED, packet.extraData);
+                    } else {
+                        this._emitter.emit(packet.event, packet.extraData);
+                    }
                 }
                 break;
             }
@@ -433,6 +473,17 @@ class PlayerEngineDedicatedThread implements PlayerEngine {
                 break;
             }
         }
+    }
+
+    public getAudioTracks(): { pid: number, type: string, lang: string }[] {
+        return this._audio_tracks;
+    }
+
+    public setAudioPID(pid: number): void {
+        this._worker?.postMessage({
+            cmd: 'set_audio_pid',
+            pid: pid,
+        } as WorkerCommandPacketSetAudioPID);
     }
 
     private _fillStatisticsInfo(stat_info: any): any {

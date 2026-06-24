@@ -70,7 +70,8 @@ export type WorkerMessagePacketPlayerEventExtraData = WorkerMessagePacketPlayerE
         | PlayerEvents.SCTE35_METADATA_ARRIVED
         | PlayerEvents.CAPTION_DATA_ARRIVED
         | PlayerEvents.PES_PRIVATE_DATA_DESCRIPTOR
-        | PlayerEvents.PES_PRIVATE_DATA_ARRIVED,
+        | PlayerEvents.PES_PRIVATE_DATA_ARRIVED
+        | PlayerEvents.AUDIO_TRACKS_UPDATED,
     extraData: any,
 };
 

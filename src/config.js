@@ -33,6 +33,17 @@ export const defaultConfig = {
     liveSyncMaxLatency: 1.2,
     liveSyncTargetLatency: 0.8,
     liveSyncPlaybackRate: 1.2,
+    // Adaptive liveSync: size the target/max band from the observed
+    // fragment-append cadence (≈ source GOP) instead of the fixed values above.
+    // buffered_end advances in keyframe-aligned jumps, so the playhead must hold
+    // a cushion ≥ the longest gap between appends or it underruns waiting for the
+    // next keyframe. With auto-tune on, liveSyncTargetLatency acts as the FLOOR
+    // (min cushion for short-GOP sources) and liveSyncMaxAutoLatency as the
+    // CEILING cap (so a pathological long/variable GOP can't inflate latency
+    // without bound). Keeps latency low for short GOPs and auto-expands for long
+    // ones — resilience for feeds whose GOP we don't control.
+    liveSyncAutoTune: false,
+    liveSyncMaxAutoLatency: 12,
 
     lazyLoad: true,
     lazyLoadMaxDuration: 3 * 60,
