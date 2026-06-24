@@ -332,6 +332,7 @@ class TransmuxingController {
         demuxer.onCaptionData = this._onCaptionData.bind(this);
         demuxer.onPESPrivateDataDescriptor = this._onPESPrivateDataDescriptor.bind(this);
         demuxer.onPESPrivateData = this._onPESPrivateData.bind(this);
+        demuxer.onAudioTracksUpdated = this._onAudioTracksUpdated.bind(this);
 
         this._remuxer.bindDataSource(this._demuxer);
         this._demuxer.bindDataSource(this._ioctl);
@@ -503,6 +504,23 @@ class TransmuxingController {
         }
 
         this._emitter.emit(TransmuxingEvents.PES_PRIVATE_DATA_ARRIVED, private_data);
+    }
+
+    _onAudioTracksUpdated(tracks) {
+        this._emitter.emit(TransmuxingEvents.AUDIO_TRACKS_UPDATED, tracks);
+    }
+
+    setAudioPID(pid) {
+        if (this._demuxer && typeof this._demuxer.setAudioPID === 'function') {
+            this._demuxer.setAudioPID(pid);
+        }
+    }
+
+    getAudioTracks() {
+        if (this._demuxer && typeof this._demuxer.getAudioTracks === 'function') {
+            return this._demuxer.getAudioTracks();
+        }
+        return [];
     }
 
     _onIOSeeked() {

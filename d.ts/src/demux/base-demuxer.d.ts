@@ -23,6 +23,11 @@ type OnCaptionDataCallback = (pts: number, data: {
 }) => void;
 type OnPESPrivateDataCallback = (private_data: PESPrivateData) => void;
 type OnPESPrivateDataDescriptorCallback = (private_data_descriptor: PESPrivateDataDescriptor) => void;
+type OnAudioTracksUpdatedCallback = (tracks: {
+    pid: number;
+    type: string;
+    lang: string;
+}[]) => void;
 export default abstract class BaseDemuxer {
     onError: OnErrorCallback;
     onMediaInfo: OnMediaInfoCallback;
@@ -39,6 +44,7 @@ export default abstract class BaseDemuxer {
     onCaptionData: OnCaptionDataCallback;
     onPESPrivateData: OnPESPrivateDataCallback;
     onPESPrivateDataDescriptor: OnPESPrivateDataDescriptorCallback;
+    onAudioTracksUpdated: OnAudioTracksUpdatedCallback;
     constructor();
     destroy(): void;
     abstract parseChunks(chunk: ArrayBuffer, byteStart: number): number;

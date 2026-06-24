@@ -350,6 +350,10 @@ declare namespace Mpegts {
         getActiveTTMLPID?(): number | null;
         /** Switch the displayed DVB TTML subtitle stream by PID (legacy; prefer setCaptionTrack). */
         setTTMLTrack?(pid: number): void;
+        /** List all audio elementary streams in the PMT (pid, codec type, ISO-639 language). */
+        getAudioTracks?(): { pid: number, type: string, lang: string }[];
+        /** Switch to a different audio elementary stream by PID. */
+        setAudioTrack?(pid: number): void;
         type: string;
         buffered: TimeRanges;
         duration: number;
@@ -458,6 +462,7 @@ declare namespace Mpegts {
         PES_PRIVATE_DATA_DESCRIPTOR: string;
         PES_PRIVATE_DATA_ARRIVED: string;
         STATISTICS_INFO: string;
+        AUDIO_TRACKS_UPDATED: string;
     }
 
     interface ErrorTypes {

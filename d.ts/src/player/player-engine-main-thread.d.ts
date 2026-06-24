@@ -15,6 +15,7 @@ declare class PlayerEngineMainThread implements PlayerEngine {
     private _live_latency_chaser?;
     private _live_latency_synchronizer?;
     private _caption_manager?;
+    private _audio_tracks;
     private _mse_source_opened;
     private _has_pending_load;
     private _loaded_metadata_received;
@@ -45,6 +46,12 @@ declare class PlayerEngineMainThread implements PlayerEngine {
     private _onRequiredUnbufferedSeek;
     private _onRequestPauseTransmuxer;
     private _onRequestResumeTransmuxer;
+    getAudioTracks(): {
+        pid: number;
+        type: string;
+        lang: string;
+    }[];
+    setAudioPID(pid: number): void;
     private _fillStatisticsInfo;
 }
 export default PlayerEngineMainThread;

@@ -73,6 +73,7 @@ class Transmuxer {
             ctl.on(TransmuxingEvents.PES_PRIVATE_DATA_ARRIVED, this._onPESPrivateDataArrived.bind(this));
             ctl.on(TransmuxingEvents.STATISTICS_INFO, this._onStatisticsInfo.bind(this));
             ctl.on(TransmuxingEvents.RECOMMEND_SEEKPOINT, this._onRecommendSeekpoint.bind(this));
+            ctl.on(TransmuxingEvents.AUDIO_TRACKS_UPDATED, this._onAudioTracksUpdated.bind(this));
         }
     }
 
@@ -269,6 +270,27 @@ class Transmuxer {
         Promise.resolve().then(() => {
             this._emitter.emit(TransmuxingEvents.RECOMMEND_SEEKPOINT, milliseconds);
         });
+    }
+
+    _onAudioTracksUpdated(tracks) {
+        Promise.resolve().then(() => {
+            this._emitter.emit(TransmuxingEvents.AUDIO_TRACKS_UPDATED, tracks);
+        });
+    }
+
+    setAudioPID(pid) {
+        if (this._worker) {
+            this._worker.postMessage({cmd: 'setAudioPID', param: pid});
+        } else if (this._controller) {
+            this._controller.setAudioPID(pid);
+        }
+    }
+
+    getAudioTracks() {
+        if (this._controller) {
+            return this._controller.getAudioTracks();
+        }
+        return [];
     }
 
     _onLoggingConfigChanged(config) {

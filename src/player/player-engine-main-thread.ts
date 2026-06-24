@@ -57,6 +57,8 @@ class PlayerEngineMainThread implements PlayerEngine {
     private _live_latency_synchronizer?: LiveLatencySynchronizer = null;
     private _caption_manager?: CaptionTrackManager = null;
 
+    private _audio_tracks: { pid: number, type: string, lang: string }[] = [];
+
     private _mse_source_opened: boolean = false;
     private _has_pending_load: boolean = false;
     private _loaded_metadata_received: boolean = false;
@@ -266,6 +268,10 @@ class PlayerEngineMainThread implements PlayerEngine {
         this._transmuxer.on(TransmuxingEvents.PES_PRIVATE_DATA_ARRIVED, (private_data: any) => {
             this._emitter.emit(PlayerEvents.PES_PRIVATE_DATA_ARRIVED, private_data);
         });
+        this._transmuxer.on(TransmuxingEvents.AUDIO_TRACKS_UPDATED, (tracks: { pid: number, type: string, lang: string }[]) => {
+            this._audio_tracks = tracks;
+            this._emitter.emit(PlayerEvents.AUDIO_TRACKS_UPDATED, tracks);
+        });
 
         this._seeking_handler = new SeekingHandler(
             this._config,
@@ -440,6 +446,16 @@ class PlayerEngineMainThread implements PlayerEngine {
 
     private _onRequestResumeTransmuxer(): void {
         this._transmuxer.resume();
+    }
+
+    public getAudioTracks(): { pid: number, type: string, lang: string }[] {
+        return this._audio_tracks;
+    }
+
+    public setAudioPID(pid: number): void {
+        if (this._transmuxer) {
+            (this._transmuxer as any).setAudioPID(pid);
+        }
     }
 
     private _fillStatisticsInfo(stat_info: any): any {

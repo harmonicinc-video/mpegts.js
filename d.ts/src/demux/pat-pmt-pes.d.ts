@@ -23,11 +23,17 @@ export declare enum StreamType {
 interface PIDToStreamTypeMap {
     [pid: number]: StreamType;
 }
+export interface AudioPIDInfo {
+    pid: number;
+    type: StreamType;
+    lang: string;
+}
 export declare class PMT {
     program_number: number;
     version_number: number;
     pcr_pid: number;
     pid_stream_type: PIDToStreamTypeMap;
+    audio_pids: AudioPIDInfo[];
     common_pids: {
         h264: number | undefined;
         h265: number | undefined;

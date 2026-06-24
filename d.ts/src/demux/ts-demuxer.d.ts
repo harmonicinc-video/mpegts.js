@@ -26,6 +26,7 @@ declare class TSDemuxer extends BaseDemuxer {
     private has_audio_;
     private video_init_segment_dispatched_;
     private audio_init_segment_dispatched_;
+    private active_audio_pid_;
     private video_metadata_changed_;
     private audio_metadata_changed_;
     private loas_previous_frame;
@@ -33,6 +34,19 @@ declare class TSDemuxer extends BaseDemuxer {
     private audio_track_;
     constructor(probe_data: any, config: any);
     destroy(): void;
+    private _audioStreamTypeToCodecName;
+    /** Returns all audio elementary streams discovered in the PMT. */
+    getAudioTracks(): {
+        pid: number;
+        type: string;
+        lang: string;
+    }[];
+    /**
+     * Switch the active audio elementary stream to the given PID.
+     * Flushes any buffered audio before switching so the MSE SourceBuffer
+     * receives a clean codec init for the new stream.
+     */
+    setAudioPID(pid: number): void;
     static probe(buffer: ArrayBuffer): {
         needMoreData: boolean;
         match?: undefined;

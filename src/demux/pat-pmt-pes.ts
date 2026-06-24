@@ -28,12 +28,21 @@ interface PIDToStreamTypeMap {
     [pid: number]: StreamType;
 }
 
+export interface AudioPIDInfo {
+    pid: number;
+    type: StreamType;
+    lang: string;
+}
+
 export class PMT {
     program_number: number;
     version_number: number;
     pcr_pid: number;
     // pid -> stream_type
     pid_stream_type: PIDToStreamTypeMap = {};
+
+    // All audio elementary streams in this program (pid, type, language).
+    audio_pids: AudioPIDInfo[] = [];
 
     common_pids: {
         h264: number | undefined,

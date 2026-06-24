@@ -21,7 +21,7 @@ import DemuxErrors from './demux-errors';
 import MediaInfo from '../core/media-info';
 import {IllegalStateException} from '../utils/exception';
 import BaseDemuxer from './base-demuxer';
-import { PAT, PESData, SectionData, SliceQueue, PIDToSliceQueues, PMT, ProgramToPMTMap, StreamType } from './pat-pmt-pes';
+import { PAT, PESData, SectionData, SliceQueue, PIDToSliceQueues, PMT, ProgramToPMTMap, StreamType, AudioPIDInfo } from './pat-pmt-pes';
 import { AVCDecoderConfigurationRecord, H264AnnexBParser, H264NaluAVC1, H264NaluPayload, H264NaluType } from './h264';
 import SPSParser from './sps-parser';
 import { AACADTSParser, AACFrame, AACLOASParser, AudioSpecificConfig, LOASAACFrame } from './aac';
@@ -152,6 +152,9 @@ class TSDemuxer extends BaseDemuxer {
     private has_audio_ = false;
     private video_init_segment_dispatched_ = false;
     private audio_init_segment_dispatched_ = false;
+
+    // PID of the currently active audio stream; undefined = use first audio found.
+    private active_audio_pid_: number | undefined = undefined;
     private video_metadata_changed_ = false;
     private audio_metadata_changed_ = false;
     private loas_previous_frame: LOASAACFrame | null = null;
@@ -180,6 +183,81 @@ class TSDemuxer extends BaseDemuxer {
         this.audio_track_ = null;
 
         super.destroy();
+    }
+
+    private _audioStreamTypeToCodecName(type: StreamType): string {
+        switch (type) {
+            case StreamType.kADTSAAC:    return 'aac';
+            case StreamType.kLOASAAC:    return 'aac';
+            case StreamType.kAC3:        return 'ac-3';
+            case StreamType.kEAC3:       return 'ec-3';
+            case StreamType.kMPEG1Audio: return 'mp3';
+            case StreamType.kMPEG2Audio: return 'mp3';
+            default:                     return 'unknown';
+        }
+    }
+
+    /** Returns all audio elementary streams discovered in the PMT. */
+    public getAudioTracks(): { pid: number, type: string, lang: string }[] {
+        if (!this.pmt_) { return []; }
+        return this.pmt_.audio_pids.map((a) => ({
+            pid: a.pid,
+            type: this._audioStreamTypeToCodecName(a.type),
+            lang: a.lang,
+        }));
+    }
+
+    /**
+     * Switch the active audio elementary stream to the given PID.
+     * Flushes any buffered audio before switching so the MSE SourceBuffer
+     * receives a clean codec init for the new stream.
+     */
+    public setAudioPID(pid: number): void {
+        if (this.pmt_ && !this.pmt_.audio_pids.some((a) => a.pid === pid)) {
+            Log.w(this.TAG, `setAudioPID: PID ${pid} not found in PMT audio tracks`);
+            return;
+        }
+
+        // Flush buffered audio from the departing stream.
+        this.dispatchAudioMediaSegment();
+
+        this.active_audio_pid_ = pid;
+
+        // Immediately update pmt_.common_pids so the next TS packet is routed
+        // to the new stream (avoids waiting for the next PMT section).
+        if (this.pmt_) {
+            const track = this.pmt_.audio_pids.find((a) => a.pid === pid);
+            if (track) {
+                this.pmt_.common_pids.adts_aac = undefined;
+                this.pmt_.common_pids.loas_aac = undefined;
+                this.pmt_.common_pids.ac3      = undefined;
+                this.pmt_.common_pids.eac3     = undefined;
+                this.pmt_.common_pids.mp3      = undefined;
+                this.pmt_.common_pids.opus     = undefined;
+                if (track.type === StreamType.kADTSAAC) this.pmt_.common_pids.adts_aac = pid;
+                else if (track.type === StreamType.kLOASAAC) this.pmt_.common_pids.loas_aac = pid;
+                else if (track.type === StreamType.kAC3)  this.pmt_.common_pids.ac3  = pid;
+                else if (track.type === StreamType.kEAC3) this.pmt_.common_pids.eac3 = pid;
+                else if (track.type === StreamType.kMPEG1Audio || track.type === StreamType.kMPEG2Audio) this.pmt_.common_pids.mp3 = pid;
+            }
+        }
+
+        // Reset decoder state so the new stream re-initialises on the next
+        // audio sample instead of trying to resume mid-frame.
+        this.audio_metadata_ = {
+            codec: undefined,
+            audio_object_type: undefined,
+            sampling_freq_index: undefined,
+            sampling_frequency: undefined,
+            channel_config: undefined,
+        };
+        this.audio_init_segment_dispatched_ = false;
+        this.audio_metadata_changed_ = false;
+        this.audio_last_sample_pts_ = undefined;
+        this.aac_last_incomplete_data_ = null;
+        this.loas_previous_frame = null;
+
+        Log.v(this.TAG, `Audio PID switched to ${pid}`);
     }
 
     public static probe(buffer: ArrayBuffer) {
@@ -791,16 +869,36 @@ class TSDemuxer extends BaseDemuxer {
                 pmt.common_pids.h264 = elementary_PID;
             } else if (stream_type === StreamType.kH265 && !already_has_video) {
                 pmt.common_pids.h265 = elementary_PID;
-            } else if (stream_type === StreamType.kADTSAAC && !already_has_audio) {
-                pmt.common_pids.adts_aac = elementary_PID;
-            } else if (stream_type === StreamType.kLOASAAC && !already_has_audio) {
-                pmt.common_pids.loas_aac = elementary_PID;
-            } else if (stream_type === StreamType.kAC3 && !already_has_audio) {
-                pmt.common_pids.ac3 = elementary_PID; // ATSC AC-3
-            } else if (stream_type === StreamType.kEAC3 && !already_has_audio) {
-                pmt.common_pids.eac3 = elementary_PID; // ATSC EAC-3
-            } else if ((stream_type === StreamType.kMPEG1Audio || stream_type === StreamType.kMPEG2Audio) && !already_has_audio) {
-                pmt.common_pids.mp3 = elementary_PID;
+            } else if (stream_type === StreamType.kADTSAAC
+                    || stream_type === StreamType.kLOASAAC
+                    || stream_type === StreamType.kAC3
+                    || stream_type === StreamType.kEAC3
+                    || stream_type === StreamType.kMPEG1Audio
+                    || stream_type === StreamType.kMPEG2Audio) {
+                // Parse ISO 639 language descriptor for this audio ES.
+                let lang = 'und';
+                if (ES_info_length > 0) {
+                    for (let offs = i + 5; offs < i + 5 + ES_info_length; ) {
+                        const tag = data[offs];
+                        const len = data[offs + 1];
+                        if (tag === 0x0a) { // ISO_639_LANGUAGE_DESCRIPTOR
+                            lang = String.fromCharCode(...Array.from(data.slice(offs + 2, offs + 5)));
+                        }
+                        offs += 2 + len;
+                    }
+                }
+                // Track every audio ES for multi-audio selection.
+                if (!pmt.audio_pids.some((a) => a.pid === elementary_PID)) {
+                    pmt.audio_pids.push({ pid: elementary_PID, type: stream_type, lang });
+                }
+                // Default active: first audio found in the PMT wins.
+                if (!already_has_audio) {
+                    if (stream_type === StreamType.kADTSAAC) pmt.common_pids.adts_aac = elementary_PID;
+                    else if (stream_type === StreamType.kLOASAAC) pmt.common_pids.loas_aac = elementary_PID;
+                    else if (stream_type === StreamType.kAC3) pmt.common_pids.ac3 = elementary_PID; // ATSC AC-3
+                    else if (stream_type === StreamType.kEAC3) pmt.common_pids.eac3 = elementary_PID; // ATSC EAC-3
+                    else if (stream_type === StreamType.kMPEG1Audio || stream_type === StreamType.kMPEG2Audio) pmt.common_pids.mp3 = elementary_PID;
+                }
             } else if (stream_type === StreamType.kPESPrivateData) {
                 pmt.pes_private_data_pids[elementary_PID] = true;
                 if (ES_info_length > 0) {
@@ -927,6 +1025,28 @@ class TSDemuxer extends BaseDemuxer {
         }
 
         if (program_number === this.current_program_) {
+            // If the caller has selected a specific audio PID, override the default
+            // "first audio wins" selection that the loop above established.
+            if (this.active_audio_pid_ !== undefined) {
+                const active = pmt.audio_pids.find((a) => a.pid === this.active_audio_pid_);
+                if (active) {
+                    pmt.common_pids.adts_aac = undefined;
+                    pmt.common_pids.loas_aac = undefined;
+                    pmt.common_pids.ac3     = undefined;
+                    pmt.common_pids.eac3    = undefined;
+                    pmt.common_pids.mp3     = undefined;
+                    pmt.common_pids.opus    = undefined;
+                    if (active.type === StreamType.kADTSAAC) pmt.common_pids.adts_aac = active.pid;
+                    else if (active.type === StreamType.kLOASAAC) pmt.common_pids.loas_aac = active.pid;
+                    else if (active.type === StreamType.kAC3)  pmt.common_pids.ac3  = active.pid;
+                    else if (active.type === StreamType.kEAC3) pmt.common_pids.eac3 = active.pid;
+                    else if (active.type === StreamType.kMPEG1Audio || active.type === StreamType.kMPEG2Audio) pmt.common_pids.mp3 = active.pid;
+                } else {
+                    // The previously selected PID is gone; revert to default.
+                    this.active_audio_pid_ = undefined;
+                }
+            }
+
             if (this.pmt_ == undefined) {
                 Log.v(this.TAG, `Parsed first PMT: ${JSON.stringify(pmt)}`);
             }
@@ -936,6 +1056,15 @@ class TSDemuxer extends BaseDemuxer {
             }
             if (pmt.common_pids.adts_aac || pmt.common_pids.loas_aac || pmt.common_pids.ac3 || pmt.common_pids.opus || pmt.common_pids.mp3) {
                 this.has_audio_ = true;
+            }
+
+            // Notify listeners of the discovered audio track list.
+            if (pmt.audio_pids.length > 0 && this.onAudioTracksUpdated) {
+                this.onAudioTracksUpdated(pmt.audio_pids.map((a) => ({
+                    pid: a.pid,
+                    type: this._audioStreamTypeToCodecName(a.type),
+                    lang: a.lang,
+                })));
             }
         }
     }

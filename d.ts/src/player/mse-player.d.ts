@@ -43,5 +43,13 @@ declare class MSEPlayer {
     }[];
     getActiveTTMLPID(): number | null;
     setTTMLTrack(pid: number): void;
+    /** List all audio elementary streams discovered in the PMT. */
+    getAudioTracks(): {
+        pid: number;
+        type: string;
+        lang: string;
+    }[];
+    /** Switch to a different audio elementary stream by PID. */
+    setAudioTrack(pid: number): void;
 }
 export default MSEPlayer;

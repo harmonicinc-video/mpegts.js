@@ -192,6 +192,20 @@ class MSEPlayer {
         this.setCaptionTrack(`ttml:${pid}`);
     }
 
+    // --- Audio track (PID) selection ---
+
+    /** List all audio elementary streams discovered in the PMT. */
+    public getAudioTracks(): { pid: number, type: string, lang: string }[] {
+        const engine = this._player_engine as any;
+        return engine?.getAudioTracks ? engine.getAudioTracks() : [];
+    }
+
+    /** Switch to a different audio elementary stream by PID. */
+    public setAudioTrack(pid: number): void {
+        const engine = this._player_engine as any;
+        if (engine?.setAudioPID) { engine.setAudioPID(pid); }
+    }
+
 }
 
 export default MSEPlayer;
