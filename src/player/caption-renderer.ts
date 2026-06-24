@@ -36,6 +36,15 @@ export default class CaptionRenderer {
     private _flushTimer: ReturnType<typeof setTimeout> | null = null;
     private _pendingText: string | null = null;
 
+    // ── Roll-up scroll animation ──────────────────────────────────────
+    /**
+     * Duration of the upward roll-up slide. A short snap reads as an abrupt
+     * jolt; a longer slide reads as a gentle scroll (the W3C roll-up guidance
+     * recommends a CSS-transition scroll). This is preview-only — it never
+     * touches the emitted CEA-608/708 bytes.
+     */
+    private static readonly SCROLL_ANIM_MS = 300;
+
     constructor(videoElement: HTMLMediaElement) {
         this._videoElement = videoElement;
         // Create overlay container positioned over the video
@@ -185,9 +194,10 @@ export default class CaptionRenderer {
     }
 
     /**
-     * Play a short upward slide so a roll-up reads as scrolling motion rather
+     * Play an upward slide so a roll-up reads as gentle scrolling motion rather
      * than an instant text swap. Starts the block one row lower, then animates
-     * it back to rest.
+     * it back to rest over SCROLL_ANIM_MS with an ease-out curve so it
+     * decelerates into place instead of snapping.
      */
     private _animateScroll(): void {
         const h = this._lineRows[0] ? this._lineRows[0].offsetHeight : 0;
@@ -197,7 +207,7 @@ export default class CaptionRenderer {
         el.style.transform = `translateY(${h}px)`;
         // Force reflow so the starting transform commits before we animate.
         void el.offsetHeight;
-        el.style.transition = 'transform 0.15s ease-out';
+        el.style.transition = `transform ${CaptionRenderer.SCROLL_ANIM_MS}ms ease-out`;
         el.style.transform = 'translateY(0)';
     }
 

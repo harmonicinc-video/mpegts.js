@@ -33,6 +33,13 @@ export default class CaptionRenderer {
     private static readonly REPAINT_THROTTLE_MS;
     private _flushTimer;
     private _pendingText;
+    /**
+     * Duration of the upward roll-up slide. A short snap reads as an abrupt
+     * jolt; a longer slide reads as a gentle scroll (the W3C roll-up guidance
+     * recommends a CSS-transition scroll). This is preview-only — it never
+     * touches the emitted CEA-608/708 bytes.
+     */
+    private static readonly SCROLL_ANIM_MS;
     constructor(videoElement: HTMLMediaElement);
     /**
      * Update the displayed text (live display model).
@@ -53,9 +60,10 @@ export default class CaptionRenderer {
      */
     private _render;
     /**
-     * Play a short upward slide so a roll-up reads as scrolling motion rather
+     * Play an upward slide so a roll-up reads as gentle scrolling motion rather
      * than an instant text swap. Starts the block one row lower, then animates
-     * it back to rest.
+     * it back to rest over SCROLL_ANIM_MS with an ease-out curve so it
+     * decelerates into place instead of snapping.
      */
     private _animateScroll;
     /** Create a stable, centered line row holding one text box. */
