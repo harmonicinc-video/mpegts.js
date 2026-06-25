@@ -30,6 +30,7 @@ class Transmuxer {
     constructor(mediaDataSource, config) {
         this.TAG = 'Transmuxer';
         this._emitter = new EventEmitter();
+        this._audio_tracks = [];  // cached audio-track list (used in worker mode)
 
         if (config.enableWorker && typeof (Worker) !== 'undefined') {
             try {
@@ -273,6 +274,7 @@ class Transmuxer {
     }
 
     _onAudioTracksUpdated(tracks) {
+        this._audio_tracks = tracks;
         Promise.resolve().then(() => {
             this._emitter.emit(TransmuxingEvents.AUDIO_TRACKS_UPDATED, tracks);
         });
@@ -290,7 +292,9 @@ class Transmuxer {
         if (this._controller) {
             return this._controller.getAudioTracks();
         }
-        return [];
+        // Worker mode: the controller lives in the worker, so return the list
+        // cached from the relayed AUDIO_TRACKS_UPDATED message.
+        return this._audio_tracks || [];
     }
 
     _onLoggingConfigChanged(config) {
@@ -335,6 +339,10 @@ class Transmuxer {
             case TransmuxingEvents.PES_PRIVATE_DATA_DESCRIPTOR:
             case TransmuxingEvents.PES_PRIVATE_DATA_ARRIVED:
             case TransmuxingEvents.STATISTICS_INFO:
+                this._emitter.emit(message.msg, data);
+                break;
+            case TransmuxingEvents.AUDIO_TRACKS_UPDATED:
+                this._audio_tracks = data;
                 this._emitter.emit(message.msg, data);
                 break;
             case TransmuxingEvents.CAPTION_DATA_ARRIVED:

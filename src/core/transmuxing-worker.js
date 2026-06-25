@@ -68,6 +68,7 @@ let TransmuxingWorker = function (self) {
                 controller.on(TransmuxingEvents.PES_PRIVATE_DATA_ARRIVED, onPESPrivateDataArrived.bind(this));
                 controller.on(TransmuxingEvents.STATISTICS_INFO, onStatisticsInfo.bind(this));
                 controller.on(TransmuxingEvents.RECOMMEND_SEEKPOINT, onRecommendSeekpoint.bind(this));
+                controller.on(TransmuxingEvents.AUDIO_TRACKS_UPDATED, onAudioTracksUpdated.bind(this));
                 break;
             case 'destroy':
                 if (controller) {
@@ -90,6 +91,9 @@ let TransmuxingWorker = function (self) {
                 break;
             case 'resume':
                 controller.resume();
+                break;
+            case 'setAudioPID':
+                controller.setAudioPID(e.data.param);
                 break;
             case 'logging_config': {
                 let config = e.data.param;
@@ -249,6 +253,14 @@ let TransmuxingWorker = function (self) {
         let obj = {
             msg: TransmuxingEvents.STATISTICS_INFO,
             data: statInfo
+        };
+        self.postMessage(obj);
+    }
+
+    function onAudioTracksUpdated(tracks) {
+        let obj = {
+            msg: TransmuxingEvents.AUDIO_TRACKS_UPDATED,
+            data: tracks
         };
         self.postMessage(obj);
     }

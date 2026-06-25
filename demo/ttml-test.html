@@ -107,6 +107,11 @@
                             onclick="toggleCCMenu(event)">Subtitles</button>
                     <div class="cc-menu" id="ccMenu" hidden></div>
                 </div>
+                <div class="cc-wrap">
+                    <button class="ctrl-btn" id="audioBtn" title="Audio track"
+                            onclick="toggleAudioMenu(event)">Audio</button>
+                    <div class="cc-menu" id="audioMenu" hidden></div>
+                </div>
                 <button class="ctrl-btn" id="muteBtn" title="Mute / unmute"
                         onclick="toggleMute()">🔇</button>
                 <button class="ctrl-btn" id="fsBtn" title="Fullscreen"
@@ -136,6 +141,7 @@
         var objectUrl = null;   // tracks the blob: URL for an opened local file
         var session = null;     // { url, isLive, retries, maxRetries, timer }
         var tearingDown = false; // suppress live resync during intentional teardown
+        var activeAudioPid = null; // currently selected audio PID (no engine getter, tracked here)
 
         function log(msg) {
             var box = document.getElementById('logBox');
@@ -169,11 +175,12 @@
             // vos-ai-console preview which plays the SRT-sourced tap as live
             // MPEG-TS over HTTP).
             session = { url: url, isLive: !!opts.isLive, retries: 0, maxRetries: 8, timer: null };
-            evtCount = 0; knownPids = {};
+            evtCount = 0; knownPids = {}; activeAudioPid = null;
             document.getElementById('evtCount').textContent = '0';
             document.getElementById('activePid').textContent = '—';
             document.getElementById('statusText').textContent = 'Loading...';
             refreshTracks();
+            refreshAudioTracks();
 
             log('Creating ' + (session.isLive ? 'LIVE' : 'VOD') + ' player (enableCaptions: true)');
             log('URL: ' + url);
@@ -234,6 +241,18 @@
             player.on(mpegts.Events.CAPTION_DATA_ARRIVED, function() {
                 // CEA-608/708 present → make sure the unified list shows it.
                 refreshTracks();
+            });
+
+            player.on(mpegts.Events.AUDIO_TRACKS_UPDATED, function(tracks) {
+                // Audio ESes discovered/changed in the PMT → repopulate the menu.
+                // Default the active selection to the first track if unset.
+                if (activeAudioPid == null && tracks && tracks.length) {
+                    activeAudioPid = tracks[0].pid;
+                }
+                log('AUDIO_TRACKS_UPDATED: ' + (tracks || []).map(function(t) {
+                    return t.lang + '/' + t.type + ' (pid ' + t.pid + ')';
+                }).join(', '));
+                refreshAudioTracks();
             });
 
             player.on(mpegts.Events.ERROR, function(type, detail, info) {
@@ -340,13 +359,79 @@
 
         function closeCCMenu() {
             document.getElementById('ccMenu').setAttribute('hidden', '');
-            document.getElementById('controlBar').classList.remove('show');
+            if (document.getElementById('audioMenu').hasAttribute('hidden')) {
+                document.getElementById('controlBar').classList.remove('show');
+            }
         }
 
-        // Close the menu when clicking anywhere else.
+        // --- In-player Audio menu (driven by getAudioTracks()/setAudioTrack()) ---
+
+        function refreshAudioTracks() {
+            var menu = document.getElementById('audioMenu');
+            var audioBtn = document.getElementById('audioBtn');
+            var tracks = player ? player.getAudioTracks() : [];
+
+            menu.innerHTML = '';
+            var title = document.createElement('div');
+            title.className = 'cc-title';
+            title.textContent = 'Audio track';
+            menu.appendChild(title);
+
+            if (!tracks.length) {
+                var empty = document.createElement('div');
+                empty.className = 'cc-empty';
+                empty.textContent = player ? '(discovering…)' : '(load a stream)';
+                menu.appendChild(empty);
+            }
+
+            tracks.forEach(function(t) {
+                var isActive = (t.pid === activeAudioPid);
+                var label = (t.lang || 'und') + ' · ' + t.type + ' · pid ' + t.pid;
+                var item = document.createElement('div');
+                item.className = 'cc-item' + (isActive ? ' active' : '');
+                item.innerHTML = '<span class="check">' + (isActive ? '✓' : '') + '</span>'
+                               + '<span>' + label + '</span>';
+                item.onclick = function() {
+                    if (!player) { return; }
+                    player.setAudioTrack(t.pid);
+                    activeAudioPid = t.pid;
+                    log('Selected audio track: ' + label);
+                    refreshAudioTracks();
+                    closeAudioMenu();
+                };
+                menu.appendChild(item);
+            });
+
+            // Button glows green once more than one audio track is selectable.
+            audioBtn.classList.toggle('active', tracks.length > 1);
+        }
+
+        function toggleAudioMenu(e) {
+            if (e) { e.stopPropagation(); }
+            var menu = document.getElementById('audioMenu');
+            var open = menu.hasAttribute('hidden');
+            if (open) {
+                refreshAudioTracks();
+                menu.removeAttribute('hidden');
+                document.getElementById('controlBar').classList.add('show');
+            } else {
+                closeAudioMenu();
+            }
+        }
+
+        function closeAudioMenu() {
+            document.getElementById('audioMenu').setAttribute('hidden', '');
+            if (document.getElementById('ccMenu').hasAttribute('hidden')) {
+                document.getElementById('controlBar').classList.remove('show');
+            }
+        }
+
+        // Close either popup menu when clicking anywhere else.
         document.addEventListener('click', function(e) {
-            var wrap = document.querySelector('.cc-wrap');
-            if (wrap && !wrap.contains(e.target)) { closeCCMenu(); }
+            var wraps = document.querySelectorAll('.cc-wrap');
+            var inside = false;
+            wraps.forEach(function(w) { if (w.contains(e.target)) { inside = true; } });
+            if (!inside) { closeCCMenu(); closeAudioMenu(); }
         });
 
         function togglePlay() {
@@ -446,7 +531,9 @@
             session = null;
             if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
             if (had) { log('Player destroyed'); }
+            activeAudioPid = null;
             refreshTracks();
+            refreshAudioTracks();
         }
 
         function clearLog() { document.getElementById('logBox').textContent = ''; }
