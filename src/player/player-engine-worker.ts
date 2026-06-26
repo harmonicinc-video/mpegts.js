@@ -101,6 +101,11 @@ const PlayerEngineWorker = (self: DedicatedWorkerGlobalScope) => {
                 break;
             case 'shutdown_mse':
                 shutdownMSE();
+                // Ack so the main thread detaches the MediaSource handle only
+                // after we've torn down our SourceBuffers while still attached.
+                self.postMessage({
+                    msg: 'mse_shutdown',
+                } as WorkerMessagePacket);
                 break;
             case 'load':
                 load();

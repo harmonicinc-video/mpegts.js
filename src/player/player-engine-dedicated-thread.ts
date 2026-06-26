@@ -64,6 +64,9 @@ class PlayerEngineDedicatedThread implements PlayerEngine {
     private _config: any;
 
     private _media_element?: HTMLMediaElement = null;
+    // Element whose MediaSource handle is waiting to be detached once the worker
+    // confirms it has shut down its MediaSource (see detachMediaElement).
+    private _pending_detach_element?: HTMLMediaElement = null;
 
     private _worker: Worker;
     private _worker_destroying: boolean = false;
@@ -176,6 +179,9 @@ class PlayerEngineDedicatedThread implements PlayerEngine {
     }
 
     public attachMediaElement(mediaElement: HTMLMediaElement): void {
+        // Cancel any deferred detach so a late mse_shutdown ack from a previous
+        // detach can't null the srcObject we're about to attach.
+        this._pending_detach_element = null;
         this._media_element = mediaElement;
 
         // Remove src / srcObject of HTMLMediaElement for cleanup
@@ -196,23 +202,41 @@ class PlayerEngineDedicatedThread implements PlayerEngine {
     }
 
     public detachMediaElement(): void {
-        this._worker.postMessage({
+        this._worker?.postMessage({
             cmd: 'shutdown_mse',
         });
 
         if (this._media_element) {
-            // Remove all appended event listeners
+            // Removing the media-element listeners is safe to do now — only the
+            // srcObject detachment races with the worker's MediaSource teardown.
             this._media_element.removeEventListener('loadedmetadata', this.e.onMediaLoadedMetadata);
             this._media_element.removeEventListener('timeupdate', this.e.onMediaTimeUpdate);
             this._media_element.removeEventListener('readystatechange', this.e.onMediaReadyStateChanged);
 
-            // Detach media source from media element
-            this._media_element.src = '';
-            this._media_element.removeAttribute('src');
-            this._media_element.srcObject = null;
-            this._media_element.load();
+            // Defer the srcObject detach until the worker acks 'mse_shutdown'.
+            // Nulling srcObject here would put the cross-thread MediaSource handle
+            // into a "closing" state, making the worker's removeSourceBuffer /
+            // endOfStream throw ("Worker MediaSource attachment is closing").
+            this._pending_detach_element = this._media_element;
             this._media_element = null;
+
+            // If there's no worker to ack (already terminated), detach immediately.
+            if (!this._worker) {
+                this._finalizeDetach();
+            }
         }
+    }
+
+    private _finalizeDetach(): void {
+        const element = this._pending_detach_element;
+        if (!element) {
+            return;
+        }
+        this._pending_detach_element = null;
+        element.src = '';
+        element.removeAttribute('src');
+        element.srcObject = null;
+        element.load();
     }
 
     public load(): void {
@@ -389,10 +413,19 @@ class PlayerEngineDedicatedThread implements PlayerEngine {
         const message_packet = e.data as WorkerMessagePacket;
         const msg = message_packet.msg;
 
+        if (msg == 'mse_shutdown') {
+            // Worker has released its MediaSource while still attached; now it's
+            // safe to detach the handle from the media element.
+            this._finalizeDetach();
+            return;
+        }
+
         if (msg == 'destroyed' || this._worker_destroying) {
             this._worker_destroying = false;
             this._worker?.terminate();
             this._worker = null;
+            // Fallback: complete any deferred detach if the ack never arrived.
+            this._finalizeDetach();
             return;
         }
 

@@ -1,7 +1,7 @@
 import MSEEvents from '../core/mse-events';
 import PlayerEvents from './player-events';
 import TransmuxingEvents from '../core/transmuxing-events';
-export type WorkerMessageType = 'destroyed' | 'mse_init' | 'mse_event' | 'player_event' | 'transmuxing_event' | 'buffered_position_changed' | 'logcat_callback';
+export type WorkerMessageType = 'destroyed' | 'mse_init' | 'mse_shutdown' | 'mse_event' | 'player_event' | 'transmuxing_event' | 'buffered_position_changed' | 'logcat_callback';
 export type WorkerMessagePacket = {
     msg: WorkerMessageType;
 };

@@ -23,6 +23,7 @@ import TransmuxingEvents from '../core/transmuxing-events';
 export type WorkerMessageType =
     | 'destroyed'
     | 'mse_init'
+    | 'mse_shutdown'
     | 'mse_event'
     | 'player_event'
     | 'transmuxing_event'

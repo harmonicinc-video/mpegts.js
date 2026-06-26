@@ -142,6 +142,9 @@ class MSEController {
                 let sb = this._sourceBuffers[type];
                 if (sb) {
                     if (ms.readyState !== 'closed') {
+                        // removeSourceBuffer internally aborts any in-flight append/remove,
+                        // so it's safe to call while sb.updating is true (don't sb.abort()
+                        // here — abort() is disallowed during an async remove()).
                         // ms edge can throw an error: Unexpected call to method or property access
                         try {
                             ms.removeSourceBuffer(sb);
@@ -155,7 +158,10 @@ class MSEController {
                     this._sourceBuffers[type] = null;
                 }
             }
-            if (ms.readyState === 'open') {
+            // endOfStream() throws if any SourceBuffer is still updating. After the
+            // loop above the buffers are normally removed, but guard against the case
+            // where a removeSourceBuffer failed and left an updating buffer behind.
+            if (ms.readyState === 'open' && !this._anySourceBufferUpdating(ms)) {
                 try {
                     ms.endOfStream();
                 } catch (error) {
@@ -175,6 +181,16 @@ class MSEController {
             this._isBufferFull = false;
             this._mediaSource = null;
         }
+    }
+
+    _anySourceBufferUpdating(ms) {
+        let list = ms.sourceBuffers;
+        for (let i = 0; i < list.length; i++) {
+            if (list[i].updating) {
+                return true;
+            }
+        }
+        return false;
     }
 
     isManagedMediaSource() {

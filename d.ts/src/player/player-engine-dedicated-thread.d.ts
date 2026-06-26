@@ -6,6 +6,7 @@ declare class PlayerEngineDedicatedThread implements PlayerEngine {
     private _media_data_source;
     private _config;
     private _media_element?;
+    private _pending_detach_element?;
     private _worker;
     private _worker_destroying;
     private _seeking_handler?;
@@ -26,6 +27,7 @@ declare class PlayerEngineDedicatedThread implements PlayerEngine {
     off(event: string, listener: (...args: any[]) => void): void;
     attachMediaElement(mediaElement: HTMLMediaElement): void;
     detachMediaElement(): void;
+    private _finalizeDetach;
     load(): void;
     unload(): void;
     play(): Promise<void>;
