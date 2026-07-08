@@ -5,6 +5,13 @@
  * Routes ccType 0/1 → CEA-608 parser, ccType 2/3 → CEA-708 DTVCC pipeline.
  *
  * CEA-708 port based on Shaka Player (Apache-2.0).
+ *
+ * Rendering is playhead-synced: decoding happens at demux time (the demuxer
+ * runs ahead of playback by the forward buffer), but each decoded display
+ * state is captured as a PTS-stamped snapshot and only painted once
+ * currentTime reaches it. Painting on decode instead would make the caption
+ * offset equal to the buffer cushion — tens of seconds after a tap-backlog
+ * burst. Same pattern as TTMLSubtitleController's timed cue list.
  */
 import Log from '../utils/logger';
 import Cea608Parser from './cea608-parser';
@@ -30,6 +37,17 @@ export default class CaptionController {
     private _cea708_services: Map<number, Cea708Service> = new Map();
     private _cea708_order = 0;
     private _has_dtvcc_data = false;
+
+    // Playhead-synced display: decoded 708 display states, stamped with the
+    // PTS (seconds, playback timeline) of the caption data that produced them.
+    // A rAF ticker paints the latest snapshot whose pts <= currentTime.
+    private _snapshots: { pts: number, text: string }[] = [];
+    /** Hard bound on queued snapshots (background tabs pause rAF while the
+     *  worker keeps demuxing; oldest states are stale on a live stream). */
+    private static readonly SNAPSHOT_CAP = 512;
+    /** Last text painted to the renderer — repaint only on change. */
+    private _last_painted: string | null = null;
+    private _raf_handle: number | null = null;
 
 
     constructor(
@@ -65,6 +83,9 @@ export default class CaptionController {
 
         // CEA-708 DTVCC
         this._dtvcc_builder = new DtvccPacketBuilder();
+
+        this._tick = this._tick.bind(this);
+        this._raf_handle = requestAnimationFrame(this._tick);
 
         Log.v(this.TAG, 'CaptionController initialized (608+708)');
     }
@@ -113,8 +134,10 @@ export default class CaptionController {
             }
             this._dtvcc_builder.clearBuiltPackets();
 
-            // VLC-style: only update display when a service signals it
-            this._checkNeedsDisplay();
+            // VLC-style: only capture a new display state when a service
+            // signals it. Painting happens later, when the playhead reaches
+            // this state's PTS (see _tick).
+            this._checkNeedsDisplay(mediaTime);
         }
 
         // --- CEA-608 path (only if no DTVCC data in stream) ---
@@ -179,9 +202,13 @@ export default class CaptionController {
         return { field1, field2, cea708 };
     }
 
-    /** Check if any service needs a display refresh (VLC-style batching). */
-    private _checkNeedsDisplay(): void {
-        if (!this._renderer || !this._render_active) return;
+    /**
+     * Capture a display-state snapshot when any service signals a refresh
+     * (VLC-style batching). Runs even while this track is deselected, so the
+     * snapshot queue stays current and re-selecting the CEA track can show
+     * the right text for the current playhead immediately.
+     */
+    private _checkNeedsDisplay(pts_sec: number): void {
         let needsUpdate = false;
         const services = Array.from(this._cea708_services) as any[];
         for (let i = 0; i < services.length; i++) {
@@ -191,14 +218,58 @@ export default class CaptionController {
                 svc.needsDisplay = false;
             }
         }
-        if (needsUpdate) {
-            const parts: string[] = [];
-            for (let i = 0; i < services.length; i++) {
-                const t = services[i][1].getDisplayText();
-                if (t) parts.push(t);
-            }
-            this._renderer.setText(parts.join('\n'));
+        if (!needsUpdate) return;
+
+        const parts: string[] = [];
+        for (let i = 0; i < services.length; i++) {
+            const t = services[i][1].getDisplayText();
+            if (t) parts.push(t);
         }
+        const text = parts.join('\n');
+
+        // Skip no-op states; an empty string is a real state (screen clear).
+        const last = this._snapshots[this._snapshots.length - 1];
+        if (last && last.text === text) return;
+
+        this._snapshots.push({ pts: pts_sec, text });
+        if (this._snapshots.length > CaptionController.SNAPSHOT_CAP) {
+            this._snapshots.splice(0, this._snapshots.length - CaptionController.SNAPSHOT_CAP);
+        }
+    }
+
+    /**
+     * Paint the snapshot the playhead has reached: the latest one with
+     * pts <= currentTime. States decoded ahead of playback (demux runs ahead
+     * by the buffer cushion) are held back until their frame is on screen.
+     * When no snapshot has been reached yet, the current display is kept
+     * as-is rather than cleared.
+     */
+    private _tick(): void {
+        if (this._media_element && this._renderer && this._render_active) {
+            const now = this._media_element.currentTime;
+
+            // _snapshots is in decode order; PTS can be mildly non-monotonic
+            // around frame reordering, so scan the whole (capped) queue and
+            // take the last reached state in decode order.
+            let reached = -1;
+            for (let i = 0; i < this._snapshots.length; i++) {
+                if (this._snapshots[i].pts <= now) {
+                    reached = i;
+                }
+            }
+
+            if (reached >= 0) {
+                // Drop superseded states; keep the displayed one at index 0 so
+                // a deselect/reselect cycle can repaint it.
+                if (reached > 0) this._snapshots.splice(0, reached);
+                const text = this._snapshots[0].text;
+                if (text !== this._last_painted) {
+                    this._last_painted = text;
+                    this._renderer.setText(text);
+                }
+            }
+        }
+        this._raf_handle = requestAnimationFrame(this._tick);
     }
 
     enableCaptions(): void {
@@ -216,11 +287,9 @@ export default class CaptionController {
      */
     setRenderingActive(active: boolean): void {
         this._render_active = active;
-        if (active) {
-            // Re-show whatever the services currently hold.
-            this._cea708_services.forEach((svc: any) => { svc.needsDisplay = true; });
-            this._checkNeedsDisplay();
-        }
+        // Force the next tick to repaint the playhead's current snapshot
+        // (the manager clears the shared renderer on every track switch).
+        if (active) { this._last_painted = null; }
     }
 
     reset(): void {
@@ -231,9 +300,16 @@ export default class CaptionController {
         this._cea708_services.clear();
         this._cea708_order = 0;
         this._has_dtvcc_data = false;
+        this._snapshots = [];
+        this._last_painted = null;
     }
 
     destroy(): void {
+        if (this._raf_handle != null) {
+            cancelAnimationFrame(this._raf_handle);
+            this._raf_handle = null;
+        }
+        this._snapshots = [];
         this._cea608_parser1 = null;
         this._cea608_parser2 = null;
         this._dtvcc_builder = null;
