@@ -15,6 +15,12 @@
  *      update — this removes the per-update flash.
  *   3. Scroll animation: when the window rolls up, the block slides up briefly
  *      so the roll-up reads as scrolling motion rather than an instant text swap.
+ *   4. Fit-to-width font: the height-derived font is shrunk (down to a readable
+ *      floor) so the widest authored line fits the caption box instead of being
+ *      soft-wrapped. Broadcast lines are authored to a ~37-char width that fits
+ *      at a normal player size, but on a small embedded preview the font hits
+ *      its floor and a full line grows wider than the 80% box; without this it
+ *      would wrap onto a second row (white-space: pre-wrap).
  */
 export default class CaptionRenderer {
     private _container;
@@ -28,6 +34,8 @@ export default class CaptionRenderer {
     private _lineRows;
     /** Lines painted on the previous render — used to detect roll-up. */
     private _prevLines;
+    /** Offscreen span used to measure a line's natural (unwrapped) width. */
+    private _measureSpan;
     private _onFullscreenChange;
     /** Coalesce decoder updates to at most one repaint per this interval. */
     private static readonly REPAINT_THROTTLE_MS;
@@ -40,6 +48,13 @@ export default class CaptionRenderer {
      * touches the emitted CEA-608/708 bytes.
      */
     private static readonly SCROLL_ANIM_MS;
+    /**
+     * Lower bound for the fit-to-width shrink. The height-derived size is
+     * reduced only as far as this to make a wide line fit; if a line still
+     * doesn't fit at this size (a very small preview) we let it wrap rather
+     * than shrink to an illegible size.
+     */
+    private static readonly MIN_FIT_FONT_SIZE;
     constructor(videoElement: HTMLMediaElement);
     /**
      * Update the displayed text (live display model).
@@ -75,9 +90,23 @@ export default class CaptionRenderer {
      */
     private _handleFullscreenChange;
     /**
-     * Compute font size based on video container height.
+     * The desired (reading-comfort) font size from the container height.
      * CEA-708 defines 15 rows; each row ~5.33% of height (like Shaka).
-     * We use ~4.5% for comfortable reading.
+     * We use ~4.5% for comfortable reading. This is the size we'd use if
+     * width weren't a constraint; `_fitFontSize` may shrink it to fit.
      */
-    private _computeFontSize;
+    private _desiredFontSize;
+    /**
+     * Shrink `desired` until the widest line fits the caption box (the block's
+     * 80% max-width) so authored lines aren't soft-wrapped onto a second row.
+     * Returns `desired` unchanged when every line already fits.
+     *
+     * Line width scales ~linearly with font size (monospace glyph advance), so
+     * we measure the widest line's natural width at `desired` and scale down by
+     * the width ratio. The 0.98 margin absorbs the fixed horizontal padding
+     * (which doesn't scale with the font) so the result fits with a hair to
+     * spare. We never go below MIN_FIT_FONT_SIZE — past that, wrapping is
+     * preferable to an illegible font.
+     */
+    private _fitFontSize;
 }

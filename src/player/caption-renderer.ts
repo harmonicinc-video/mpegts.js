@@ -15,6 +15,12 @@
  *      update — this removes the per-update flash.
  *   3. Scroll animation: when the window rolls up, the block slides up briefly
  *      so the roll-up reads as scrolling motion rather than an instant text swap.
+ *   4. Fit-to-width font: the height-derived font is shrunk (down to a readable
+ *      floor) so the widest authored line fits the caption box instead of being
+ *      soft-wrapped. Broadcast lines are authored to a ~37-char width that fits
+ *      at a normal player size, but on a small embedded preview the font hits
+ *      its floor and a full line grows wider than the 80% box; without this it
+ *      would wrap onto a second row (white-space: pre-wrap).
  */
 export default class CaptionRenderer {
     private _container: HTMLDivElement;
@@ -28,6 +34,8 @@ export default class CaptionRenderer {
     private _lineRows: HTMLDivElement[] = [];
     /** Lines painted on the previous render — used to detect roll-up. */
     private _prevLines: string[] = [];
+    /** Offscreen span used to measure a line's natural (unwrapped) width. */
+    private _measureSpan: HTMLSpanElement;
     private _onFullscreenChange: (() => void) | null = null;
 
     // ── Repaint throttle ──────────────────────────────────────────────
@@ -44,6 +52,15 @@ export default class CaptionRenderer {
      * touches the emitted CEA-608/708 bytes.
      */
     private static readonly SCROLL_ANIM_MS = 300;
+
+    // ── Fit-to-width ──────────────────────────────────────────────────
+    /**
+     * Lower bound for the fit-to-width shrink. The height-derived size is
+     * reduced only as far as this to make a wide line fit; if a line still
+     * doesn't fit at this size (a very small preview) we let it wrap rather
+     * than shrink to an illegible size.
+     */
+    private static readonly MIN_FIT_FONT_SIZE = 12;
 
     constructor(videoElement: HTMLMediaElement) {
         this._videoElement = videoElement;
@@ -76,6 +93,25 @@ export default class CaptionRenderer {
             willChange: 'transform',
         });
         this._container.appendChild(this._textElement);
+
+        // Offscreen, non-wrapping span with the same typography as a line row,
+        // used to measure a line's natural single-line width for fit-to-width.
+        // It never affects layout (absolute + hidden) and never wraps (nowrap),
+        // so offsetWidth reports the width the line *wants* before any wrap.
+        this._measureSpan = document.createElement('span');
+        Object.assign(this._measureSpan.style, {
+            position: 'absolute',
+            left: '-99999px',
+            top: '0',
+            visibility: 'hidden',
+            whiteSpace: 'nowrap',
+            pointerEvents: 'none',
+            fontFamily: 'Consolas, "Courier New", Courier, monospace',
+            fontWeight: '500',
+            letterSpacing: '0.03em',
+            padding: '3px 10px',
+        });
+        this._container.appendChild(this._measureSpan);
 
         // Insert into the video's parent (consumer should fullscreen this parent)
         const parent = videoElement.parentElement;
@@ -162,7 +198,7 @@ export default class CaptionRenderer {
         this._renderedText = text;
 
         const lines = text ? text.split('\n') : [];
-        const fontSize = this._computeFontSize() + 'px';
+        const fontSize = this._fitFontSize(lines, this._desiredFontSize()) + 'px';
 
         // Roll-up detection: the top line changed to a line we were previously
         // showing *below* it (index > 0). That is a scroll, not bottom-line
@@ -221,7 +257,7 @@ export default class CaptionRenderer {
             backgroundColor: 'rgba(0, 0, 0, 0.75)',
             color: '#FFFFFF',
             fontFamily: 'Consolas, "Courier New", Courier, monospace',
-            fontSize: this._computeFontSize() + 'px',
+            fontSize: this._desiredFontSize() + 'px',
             fontWeight: '500',
             padding: '3px 10px',
             lineHeight: '1.5',
@@ -243,7 +279,7 @@ export default class CaptionRenderer {
      * container (Shaka Player pattern) so the overlay stays visible.
      */
     private _handleFullscreenChange(): void {
-        const fontSize = this._computeFontSize() + 'px';
+        const fontSize = this._fitFontSize(this._prevLines, this._desiredFontSize()) + 'px';
         for (const row of this._lineRows) {
             const span = row.firstElementChild as HTMLElement | null;
             if (span) span.style.fontSize = fontSize;
@@ -251,14 +287,46 @@ export default class CaptionRenderer {
     }
 
     /**
-     * Compute font size based on video container height.
+     * The desired (reading-comfort) font size from the container height.
      * CEA-708 defines 15 rows; each row ~5.33% of height (like Shaka).
-     * We use ~4.5% for comfortable reading.
+     * We use ~4.5% for comfortable reading. This is the size we'd use if
+     * width weren't a constraint; `_fitFontSize` may shrink it to fit.
      */
-    private _computeFontSize(): number {
+    private _desiredFontSize(): number {
         const containerHeight = this._videoElement?.parentElement?.clientHeight
             || this._videoElement?.clientHeight || 480;
         const size = Math.round(containerHeight * 0.045);
         return Math.max(18, Math.min(size, 42));
+    }
+
+    /**
+     * Shrink `desired` until the widest line fits the caption box (the block's
+     * 80% max-width) so authored lines aren't soft-wrapped onto a second row.
+     * Returns `desired` unchanged when every line already fits.
+     *
+     * Line width scales ~linearly with font size (monospace glyph advance), so
+     * we measure the widest line's natural width at `desired` and scale down by
+     * the width ratio. The 0.98 margin absorbs the fixed horizontal padding
+     * (which doesn't scale with the font) so the result fits with a hair to
+     * spare. We never go below MIN_FIT_FONT_SIZE — past that, wrapping is
+     * preferable to an illegible font.
+     */
+    private _fitFontSize(lines: string[], desired: number): number {
+        const maxWidth = this._container.clientWidth * 0.8;
+        if (lines.length === 0 || maxWidth <= 0) return desired;
+
+        this._measureSpan.style.fontSize = desired + 'px';
+        let widest = 0;
+        for (const line of lines) {
+            // Blank rows measure as a space so an empty line can't force a shrink.
+            this._measureSpan.textContent = line || ' ';
+            if (this._measureSpan.offsetWidth > widest) {
+                widest = this._measureSpan.offsetWidth;
+            }
+        }
+        if (widest <= maxWidth) return desired;
+
+        const scaled = Math.floor(desired * (maxWidth / widest) * 0.98);
+        return Math.max(CaptionRenderer.MIN_FIT_FONT_SIZE, Math.min(desired, scaled));
     }
 }
