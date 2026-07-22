@@ -15,12 +15,15 @@
  *      update — this removes the per-update flash.
  *   3. Scroll animation: when the window rolls up, the block slides up briefly
  *      so the roll-up reads as scrolling motion rather than an instant text swap.
- *   4. Fit-to-width font: the height-derived font is shrunk (down to a readable
- *      floor) so the widest authored line fits the caption box instead of being
- *      soft-wrapped. Broadcast lines are authored to a ~37-char width that fits
- *      at a normal player size, but on a small embedded preview the font hits
- *      its floor and a full line grows wider than the 80% box; without this it
- *      would wrap onto a second row (white-space: pre-wrap).
+ *   4. Grid-fit font: the height-derived font is shrunk (down to a readable
+ *      floor) so a *full authored line* — the 37-display-column grid the
+ *      pipeline shapes lines to — fits the caption box instead of being
+ *      soft-wrapped. Fitting the fixed grid rather than the current text keeps
+ *      the font size constant for a given player size: it never jumps between
+ *      caption updates (fitting the live text made the size a function of
+ *      content, so a wide CJK line visibly resized the block). A per-content
+ *      fit remains as a safety net for over-wide legacy lines from pipelines
+ *      that shaped CJK by character count; for grid-legal lines it is a no-op.
  */
 export default class CaptionRenderer {
     private _container: HTMLDivElement;
@@ -61,6 +64,19 @@ export default class CaptionRenderer {
      * than shrink to an illegible size.
      */
     private static readonly MIN_FIT_FONT_SIZE = 12;
+
+    /**
+     * The authoring grid: captions are shaped to a 37-display-column budget
+     * (TTML_LINE_WIDTH in the pipeline; a full-width CJK glyph counts 2
+     * columns, so CJK rows carry ≤18 glyphs). The widest legal line therefore
+     * renders no wider than 37 half-width monospace characters — this
+     * reference string. Sizing the font so *this* fits the box (instead of
+     * whatever text is currently showing) makes the size depend only on the
+     * box, so it stays rock-steady across caption updates. Slightly
+     * conservative for pure-CJK rows (a browser full-width glyph is a touch
+     * narrower than two Consolas half-widths), which only leaves spare margin.
+     */
+    private static readonly GRID_REF_LINE = '0'.repeat(37);
 
     constructor(videoElement: HTMLMediaElement) {
         this._videoElement = videoElement;
@@ -198,7 +214,7 @@ export default class CaptionRenderer {
         this._renderedText = text;
 
         const lines = text ? text.split('\n') : [];
-        const fontSize = this._fitFontSize(lines, this._desiredFontSize()) + 'px';
+        const fontSize = this._computeFontSize(lines) + 'px';
 
         // Roll-up detection: the top line changed to a line we were previously
         // showing *below* it (index > 0). That is a scroll, not bottom-line
@@ -279,11 +295,23 @@ export default class CaptionRenderer {
      * container (Shaka Player pattern) so the overlay stays visible.
      */
     private _handleFullscreenChange(): void {
-        const fontSize = this._fitFontSize(this._prevLines, this._desiredFontSize()) + 'px';
+        const fontSize = this._computeFontSize(this._prevLines) + 'px';
         for (const row of this._lineRows) {
             const span = row.firstElementChild as HTMLElement | null;
             if (span) span.style.fontSize = fontSize;
         }
+    }
+
+    /**
+     * The font size to paint at: the height-derived comfort size, shrunk so a
+     * full 37-column authored line (GRID_REF_LINE) fits the caption box —
+     * content-independent, so the size is stable for a given box size — then
+     * passed through the per-content fit purely as a safety net for over-wide
+     * legacy lines (a no-op for anything the pipeline shapes today).
+     */
+    private _computeFontSize(lines: string[]): number {
+        const gridFit = this._fitFontSize([CaptionRenderer.GRID_REF_LINE], this._desiredFontSize());
+        return this._fitFontSize(lines, gridFit);
     }
 
     /**
@@ -303,6 +331,10 @@ export default class CaptionRenderer {
      * Shrink `desired` until the widest line fits the caption box (the block's
      * 80% max-width) so authored lines aren't soft-wrapped onto a second row.
      * Returns `desired` unchanged when every line already fits.
+     *
+     * Callers pass the fixed grid reference line for the primary (stable)
+     * sizing and the live text only as an overflow safety net — see
+     * `_computeFontSize`.
      *
      * Line width scales ~linearly with font size (monospace glyph advance), so
      * we measure the widest line's natural width at `desired` and scale down by
