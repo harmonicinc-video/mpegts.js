@@ -442,6 +442,26 @@ type SegmentationDescriptor = Descriptor & {
     sub_segment_num?: number,
     sub_segments_expected?: number
 }
+/**
+ * Read a big-endian unsigned integer wider than 32 bits, byte by byte.
+ *
+ * `ExpGolomb.readBits()` throws outright above 32 bits, so a single
+ * `readBits(40)` is not just wrong but fatal: the exception escapes the
+ * demuxer into the IO loop and playback stops. Its multi-word path is also
+ * built from *signed* 32-bit shifts, so even a straddling `readBits(32)` can
+ * come back negative. Reading a byte at a time and recombining with
+ * arithmetic sidesteps both — and every field this serves (40-bit segmentation
+ * durations, 48-bit TAI seconds) is byte-aligned here and well inside the
+ * exact-integer range of a JS double.
+ */
+const readUIntBE = (reader: ExpGolomb, bytes: number): number => {
+    let value = 0;
+    for (let i = 0; i < bytes; i++) {
+        value = value * 256 + reader.readBits(8);
+    }
+    return value;
+};
+
 const parseSegmentationDescriptor = (descriptor_tag: number, descriptor_length: number, identifier: string, reader: ExpGolomb): SegmentationDescriptor => {
     const segmentation_event_id = reader.readBits(32);
     const segmentation_event_cancel_indicator = reader.readBool();
@@ -481,7 +501,8 @@ const parseSegmentationDescriptor = (descriptor_tag: number, descriptor_length: 
     }
 
     if (segmentationDescriptor.segmentation_duration_flag) {
-        segmentationDescriptor.segmentation_duration = reader.readBits(40);
+        // 40 bits (SCTE 35 §10.3.3.1), in 90 kHz ticks.
+        segmentationDescriptor.segmentation_duration = readUIntBE(reader, 5);
     }
 
     segmentationDescriptor.segmentation_upid_type = reader.readBits(8);
@@ -514,7 +535,7 @@ type TimeDescriptor = Descriptor & {
     UTC_offset: number
 }
 const parseTimeDescriptor = (descriptor_tag: number, descriptor_length: number, identifier: string, reader: ExpGolomb): TimeDescriptor => {
-    const TAI_seconds = reader.readBits(48);
+    const TAI_seconds = readUIntBE(reader, 6); // 48 bits — same cap as above.
     const TAI_ns = reader.readBits(32);
     const UTC_offset = reader.readBits(16);
 

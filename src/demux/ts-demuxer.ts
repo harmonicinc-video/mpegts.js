@@ -1070,7 +1070,19 @@ class TSDemuxer extends BaseDemuxer {
     }
 
     private parseSCTE35(data: Uint8Array): void {
-        const scte35 = readSCTE35(data);
+        // A cue section is metadata: nothing about playback depends on parsing
+        // it. Before this guard a throw in here (e.g. an over-wide readBits)
+        // propagated out of the demuxer into the IO loop, which surfaced as a
+        // `Loader error` and stopped playback for good — one malformed or
+        // simply unexpected section could wedge the whole stream. Drop the
+        // section and keep playing instead.
+        let scte35: SCTE35Data;
+        try {
+            scte35 = readSCTE35(data);
+        } catch (e) {
+            Log.w(this.TAG, `Failed to parse SCTE-35 section, ignoring it: ${e}`);
+            return;
+        }
 
         if (scte35.pts != undefined) {
             let pts_ms = Math.floor(scte35.pts / this.timescale_);
