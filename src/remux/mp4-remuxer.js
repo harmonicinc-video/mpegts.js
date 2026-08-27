@@ -24,6 +24,13 @@ import { SampleInfo, MediaSegmentInfo, MediaSegmentInfoList } from '../core/medi
 import { IllegalStateException } from '../utils/exception.js';
 
 
+// A backward audio DTS step larger than this is treated as a stream timeline
+// discontinuity (source switch, pipeline restart, failover) and re-anchored on
+// the continuous output grid, instead of dropping every frame until the wire
+// catches up (which starves audio for the whole gap and freezes playback).
+// Smaller overlaps keep the historical drop behavior (packet overlap/jitter).
+const AUDIO_DTS_DISCONTINUITY_MS = 500;
+
 // Fragmented mp4 remuxer
 class MP4Remuxer {
 
@@ -38,6 +45,7 @@ class MP4Remuxer {
         this._audioDtsBase = Infinity;
         this._videoDtsBase = Infinity;
         this._audioNextDts = undefined;
+        this._audioBackwardJumpActive = false;
         this._videoNextDts = undefined;
         this._audioStashedLastSample = null;
         this._videoStashedLastSample = null;
@@ -120,6 +128,7 @@ class MP4Remuxer {
 
     insertDiscontinuity() {
         this._audioNextDts = this._videoNextDts = undefined;
+        this._audioBackwardJumpActive = false;
     }
 
     seek(originalDts) {
@@ -362,7 +371,11 @@ class MP4Remuxer {
             let silentFrames = null;
             let sampleDuration = 0;
 
-            if (originalDts < -0.001) {
+            if (originalDts < -0.001 && this._audioNextDts === undefined) {
+                // Only before the audio timeline exists is a negative dts an
+                // invalid first sample. Mid-stream it means the wire timeline
+                // jumped below _dtsBase (e.g. a pipeline restart) — let it
+                // through so the discontinuity re-anchor below handles it.
                 continue; //pass the first sample with the invalid dts
             }
 
@@ -375,12 +388,22 @@ class MP4Remuxer {
                 }
 
                 dtsCorrection = originalDts - curRefDts;
-                if (dtsCorrection <= -maxAudioFramesDrift * refSampleDuration) {
+                const backwardJump = dtsCorrection <= -AUDIO_DTS_DISCONTINUITY_MS;
+                if (backwardJump) {
+                    if (!this._audioBackwardJumpActive) {
+                        this._audioBackwardJumpActive = true;
+                        Log.w(this.TAG, `Audio DTS jumped backwards (originalDts: ${originalDts} ms, curRefDts: ${curRefDts} ms, ` +
+                            `dtsCorrection: ${Math.round(dtsCorrection)} ms) — treating as timeline discontinuity, re-anchoring on the continuous grid.`);
+                    }
+                } else {
+                    this._audioBackwardJumpActive = false;
+                }
+                if (!backwardJump && dtsCorrection <= -maxAudioFramesDrift * refSampleDuration) {
                     // If we're overlapping by more than maxAudioFramesDrift number of frame, drop this sample
                     Log.w(this.TAG, `Dropping 1 audio frame (originalDts: ${originalDts} ms ,curRefDts: ${curRefDts} ms)  due to dtsCorrection: ${dtsCorrection} ms overlap.`);
                     continue;
                 }
-                else if (dtsCorrection >= maxAudioFramesDrift * refSampleDuration && this._fillAudioTimestampGap && !Browser.safari) {
+                else if (!backwardJump && dtsCorrection >= maxAudioFramesDrift * refSampleDuration && this._fillAudioTimestampGap && !Browser.safari) {
                     // Silent frame generation, if large timestamp gap detected && config.fixAudioTimestampGap
                     needFillSilentFrames = true;
                     // We need to insert silent frames to fill timestamp gap
