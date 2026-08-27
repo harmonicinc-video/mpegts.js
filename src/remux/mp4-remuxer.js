@@ -24,12 +24,15 @@ import { SampleInfo, MediaSegmentInfo, MediaSegmentInfoList } from '../core/medi
 import { IllegalStateException } from '../utils/exception.js';
 
 
-// A backward audio DTS step larger than this is treated as a stream timeline
-// discontinuity (source switch, pipeline restart, failover) and re-anchored on
-// the continuous output grid, instead of dropping every frame until the wire
-// catches up (which starves audio for the whole gap and freezes playback).
-// Smaller overlaps keep the historical drop behavior (packet overlap/jitter).
-const AUDIO_DTS_DISCONTINUITY_MS = 500;
+// A backward DTS step larger than this is treated as a stream timeline
+// discontinuity (source switch, pipeline restart, failover) rather than as
+// packet overlap or jitter. Audio re-anchors on the continuous output grid
+// instead of dropping every frame until the wire catches up (which starves
+// audio for the whole gap and freezes playback); both tracks discard the
+// sample stashed from the old timeline, because deriving a batch's
+// dtsCorrection from it maps every genuinely new sample far into the past.
+// Smaller overlaps keep the historical behavior.
+const DTS_DISCONTINUITY_MS = 500;
 
 // Fragmented mp4 remuxer
 class MP4Remuxer {
@@ -124,6 +127,25 @@ class MP4Remuxer {
 
     set onMediaSegment(callback) {
         this._onMediaSegment = callback;
+    }
+
+    // True when `firstNewSample` sits far enough below the track's running
+    // output timeline (or below the sample stashed from the previous batch) to
+    // be a stream discontinuity rather than overlap/jitter. Compared against
+    // _{audio,video}NextDts when known, else against the stashed sample, so it
+    // still fires on the batch where the timeline reference was just reset.
+    _isBackwardDiscontinuity(firstNewSample, stashedSample, nextDts) {
+        if (firstNewSample == null) {
+            return false;
+        }
+        const originalDts = firstNewSample.dts - this._dtsBase;
+        const reference = nextDts !== undefined
+            ? nextDts
+            : (stashedSample != null ? stashedSample.dts - this._dtsBase : undefined);
+        if (reference === undefined) {
+            return false;
+        }
+        return (originalDts - reference) <= -DTS_DISCONTINUITY_MS;
     }
 
     insertDiscontinuity() {
@@ -299,12 +321,19 @@ class MP4Remuxer {
             mdatBytes -= lastSample.length;
         }
 
-        // Insert [stashed lastSample in the previous batch] to the front
+        // Insert [stashed lastSample in the previous batch] to the front.
+        // Across a timeline discontinuity the stashed sample belongs to the OLD
+        // timeline: it must not be re-inserted, or it lands on the new grid as a
+        // stray frame from minutes ago (and skews this batch's dtsCorrection).
         if (this._audioStashedLastSample != null) {
             let sample = this._audioStashedLastSample;
             this._audioStashedLastSample = null;
-            samples.unshift(sample);
-            mdatBytes += sample.length;
+            if (!this._isBackwardDiscontinuity(samples[0], sample, this._audioNextDts)) {
+                samples.unshift(sample);
+                mdatBytes += sample.length;
+            }
+            // else: dropped. No mdatBytes adjustment — the stashed sample was
+            // never part of this batch's track.length in the first place.
         }
 
         // Stash the lastSample of current batch, waiting for next batch
@@ -388,7 +417,7 @@ class MP4Remuxer {
                 }
 
                 dtsCorrection = originalDts - curRefDts;
-                const backwardJump = dtsCorrection <= -AUDIO_DTS_DISCONTINUITY_MS;
+                const backwardJump = dtsCorrection <= -DTS_DISCONTINUITY_MS;
                 if (backwardJump) {
                     if (!this._audioBackwardJumpActive) {
                         this._audioBackwardJumpActive = true;
@@ -626,12 +655,22 @@ class MP4Remuxer {
             mdatBytes -= lastSample.length;
         }
 
-        // Insert [stashed lastSample in the previous batch] to the front
+        // Insert [stashed lastSample in the previous batch] to the front.
+        // Across a timeline discontinuity the stashed sample belongs to the OLD
+        // timeline. Keeping it made samples[0] a stale sample, so this batch's
+        // dtsCorrection was derived from it and every genuinely new frame was
+        // mapped ~(jump) into the past — MSE dropped them and the picture froze
+        // on its last frame while audio carried on. Dropping it lets the
+        // standard correction anchor the new samples on _videoNextDts.
         if (this._videoStashedLastSample != null) {
             let sample = this._videoStashedLastSample;
             this._videoStashedLastSample = null;
-            samples.unshift(sample);
-            mdatBytes += sample.length;
+            if (!this._isBackwardDiscontinuity(samples[0], sample, this._videoNextDts)) {
+                samples.unshift(sample);
+                mdatBytes += sample.length;
+            }
+            // else: dropped. No mdatBytes adjustment — the stashed sample was
+            // never part of this batch's track.length in the first place.
         }
 
         // Stash the lastSample of current batch, waiting for next batch
