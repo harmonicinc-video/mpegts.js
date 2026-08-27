@@ -49,6 +49,7 @@ class MP4Remuxer {
         this._videoDtsBase = Infinity;
         this._audioNextDts = undefined;
         this._audioBackwardJumpActive = false;
+        this._videoBackwardJumpActive = false;
         this._videoNextDts = undefined;
         this._audioStashedLastSample = null;
         this._videoStashedLastSample = null;
@@ -151,6 +152,7 @@ class MP4Remuxer {
     insertDiscontinuity() {
         this._audioNextDts = this._videoNextDts = undefined;
         this._audioBackwardJumpActive = false;
+        this._videoBackwardJumpActive = false;
     }
 
     seek(originalDts) {
@@ -706,9 +708,39 @@ class MP4Remuxer {
         let mp4Samples = [];
 
         // Correct dts for each sample, and calculate sample duration. Then output to mp4Samples
+        let previousOriginalDts = null;
+
         for (let i = 0; i < samples.length; i++) {
             let sample = samples[i];
             let originalDts = sample.dts - this._dtsBase;
+
+            // A single batch can straddle a stream discontinuity: the source
+            // looped or restarted part-way through it. dtsCorrection was derived
+            // from samples[0], i.e. the OLD timeline, so from here on it maps
+            // every new sample by the size of the jump into the past. MSE drops
+            // those, and because the batch's last sample leaves _videoNextDts in
+            // the past, every later batch is anchored to that garbage too — the
+            // picture freezes for good while audio, which rides its own grid,
+            // keeps playing. Re-anchor on the running output timeline instead.
+            // Video dts is decode order and monotonic in a well-formed stream
+            // (reordering lives in cts), so a large step back is unambiguous.
+            if (previousOriginalDts !== null
+                    && (originalDts - previousOriginalDts) <= -DTS_DISCONTINUITY_MS) {
+                let previousMp4Sample = mp4Samples[mp4Samples.length - 1];
+                if (previousMp4Sample != null) {
+                    dtsCorrection = originalDts - (previousMp4Sample.dts + previousMp4Sample.duration);
+                    if (!this._videoBackwardJumpActive) {
+                        this._videoBackwardJumpActive = true;
+                        Log.w(this.TAG, `Video DTS jumped backwards mid-batch (originalDts: ${originalDts} ms, ` +
+                            `previous: ${previousOriginalDts} ms) — treating as timeline discontinuity, ` +
+                            `re-anchoring on the continuous grid.`);
+                    }
+                }
+            } else if (previousOriginalDts !== null) {
+                this._videoBackwardJumpActive = false;
+            }
+            previousOriginalDts = originalDts;
+
             let isKeyframe = sample.isKeyframe;
             let dts = originalDts - dtsCorrection;
             let cts = sample.cts;
@@ -721,18 +753,23 @@ class MP4Remuxer {
 
             let sampleDuration = 0;
 
-            if (i !== samples.length - 1) {
-                let nextDts = samples[i + 1].dts - this._dtsBase - dtsCorrection;
+            // The sample that measures this one's duration is the next in the
+            // batch, else the one stashed for the next batch. Across a
+            // discontinuity it belongs to another timeline and cannot measure
+            // anything — that is what produced segments whose endDts preceded
+            // their beginDts — so fall back to a known-good duration.
+            let nextSample = (i !== samples.length - 1) ? samples[i + 1] : lastSample;
+            if (nextSample != null && (nextSample.dts - sample.dts) <= -DTS_DISCONTINUITY_MS) {
+                nextSample = null;
+            }
+
+            if (nextSample != null) {
+                let nextDts = nextSample.dts - this._dtsBase - dtsCorrection;
                 sampleDuration = nextDts - dts;
-            } else {  // the last sample
-                if (lastSample != null) {  // use stashed sample's dts to calculate sample duration
-                    let nextDts = lastSample.dts - this._dtsBase - dtsCorrection;
-                    sampleDuration = nextDts - dts;
-                } else if (mp4Samples.length >= 1) {  // use second last sample duration
-                    sampleDuration = mp4Samples[mp4Samples.length - 1].duration;
-                } else {  // the only one sample, use reference sample duration
-                    sampleDuration = Math.floor(this._videoMeta.refSampleDuration);
-                }
+            } else if (mp4Samples.length >= 1) {  // use second last sample duration
+                sampleDuration = mp4Samples[mp4Samples.length - 1].duration;
+            } else {  // the only one sample, use reference sample duration
+                sampleDuration = Math.floor(this._videoMeta.refSampleDuration);
             }
 
             if (isKeyframe) {
