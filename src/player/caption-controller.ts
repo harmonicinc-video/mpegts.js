@@ -36,6 +36,17 @@ export default class CaptionController {
     private _dtvcc_builder: DtvccPacketBuilder;
     private _cea708_services: Map<number, Cea708Service> = new Map();
     private _cea708_order = 0;
+    /** DTVCC bytes awaiting their turn in presentation order (`_drainCea708`). */
+    private _cea708_pending: Cea708Byte[] = [];
+    /** Newest PTS seen on a DTVCC byte — the reorder window trails it. */
+    private _cea708_newest_pts = 0;
+    /**
+     * How far the newest PTS must move past a byte before it is safe to decode.
+     * Bounded by the stream's B-frame reorder depth: on 25fps content that is
+     * two or three frames, so half a second is generous without being a
+     * meaningful hold on a decoder already running ahead of the playhead.
+     */
+    private static readonly CEA708_REORDER_SEC = 0.5;
     private _has_dtvcc_data = false;
 
     // Playhead-synced display: decoded 708 display states, stamped with the
@@ -109,39 +120,10 @@ export default class CaptionController {
         if (extracted.cea708.length > 0) {
             this._has_dtvcc_data = true;
             for (const byte of extracted.cea708) {
-                this._dtvcc_builder.addByte(byte);
+                this._cea708_pending.push(byte);
+                if (byte.pts > this._cea708_newest_pts) this._cea708_newest_pts = byte.pts;
             }
-            const packets = this._dtvcc_builder.getBuiltPackets();
-            for (const pkt of packets) {
-                try {
-                    while (pkt.hasMoreData()) {
-                        const header = pkt.readByte().value;
-                        let serviceNum = (header & 0xe0) >> 5;
-                        const blockSize = header & 0x1f;
-                        if (serviceNum === 0x07 && blockSize !== 0) {
-                            serviceNum = pkt.readByte().value & 0x3f;
-                        }
-                        if (serviceNum !== 0) {
-                            if (!this._cea708_services.has(serviceNum)) {
-                                this._cea708_services.set(serviceNum, new Cea708Service(serviceNum));
-                            }
-                            const svc = this._cea708_services.get(serviceNum)!;
-                            const startPos = pkt.getPosition();
-                            while (pkt.getPosition() - startPos < blockSize) {
-                                svc.handleCea708ControlCode(pkt);
-                            }
-                        }
-                    }
-                } catch (e) {
-                    // Invalid packet — skip
-                }
-            }
-            this._dtvcc_builder.clearBuiltPackets();
-
-            // VLC-style: only capture a new display state when a service
-            // signals it. Painting happens later, when the playhead reaches
-            // this state's PTS (see _tick).
-            this._checkNeedsDisplay(mediaTime);
+            this._drainCea708();
         }
 
         // --- CEA-608 path (only if no DTVCC data in stream) ---
@@ -153,6 +135,86 @@ export default class CaptionController {
                 this._cea608_parser2.addData(mediaTime, extracted.field2);
             }
         }
+    }
+
+    /**
+     * Feed buffered DTVCC bytes to the packet builder in presentation order.
+     *
+     * SEI cc_data arrives in *decode* order, so with B-frames a byte pair can
+     * reach us before a pair that precedes it on the timeline. A DTVCC packet
+     * is a run of pairs headed by one that declares its length, and
+     * `DtvccPacketBuilder` discards a packet the moment a new start arrives —
+     * so a single displaced pair silently destroys a whole packet's characters.
+     * The row then closes up around the hole ("to the Middle East" rendering as
+     * "to t East"), because the window's unwritten cells contribute nothing.
+     * Measured on a live capture: 9 of 370 packets destroyed this way.
+     *
+     * Sorting on `(pts, order)` — presentation time, ties broken by arrival —
+     * is what Shaka's CeaDecoder.decode() does before building packets, and it
+     * is why `Cea708Byte` has carried an `order` field all along. With the sort
+     * in place, all 370 of those packets assemble intact.
+     *
+     * Bytes are held until the newest PTS seen has moved a full
+     * [`CEA708_REORDER_SEC`] past them, which is what makes it safe to assume
+     * nothing earlier is still coming. The wait costs no visible latency: the
+     * demuxer runs ahead of the playhead by the buffer cushion, and `_tick`
+     * paints on PTS regardless.
+     */
+    private _drainCea708(): void {
+        const cutoff = this._cea708_newest_pts - CaptionController.CEA708_REORDER_SEC;
+        this._cea708_pending.sort((a, b) => (a.pts - b.pts) || (a.order - b.order));
+
+        let ready = 0;
+        while (ready < this._cea708_pending.length
+               && this._cea708_pending[ready].pts <= cutoff) {
+            ready++;
+        }
+        if (ready === 0) return;
+
+        // Snapshot at each frame boundary rather than once at the end, so a
+        // display state keeps the PTS of the bytes that produced it — _tick
+        // schedules on that.
+        const batch = this._cea708_pending.splice(0, ready);
+        let framePts = batch[0].pts;
+        for (const byte of batch) {
+            if (byte.pts !== framePts) {
+                this._consumeCea708Packets();
+                this._checkNeedsDisplay(framePts);
+                framePts = byte.pts;
+            }
+            this._dtvcc_builder.addByte(byte);
+        }
+        this._consumeCea708Packets();
+        this._checkNeedsDisplay(framePts);
+    }
+
+    /** Decode whatever complete DTVCC packets the builder is holding. */
+    private _consumeCea708Packets(): void {
+        for (const pkt of this._dtvcc_builder.getBuiltPackets()) {
+            try {
+                while (pkt.hasMoreData()) {
+                    const header = pkt.readByte().value;
+                    let serviceNum = (header & 0xe0) >> 5;
+                    const blockSize = header & 0x1f;
+                    if (serviceNum === 0x07 && blockSize !== 0) {
+                        serviceNum = pkt.readByte().value & 0x3f;
+                    }
+                    if (serviceNum !== 0) {
+                        if (!this._cea708_services.has(serviceNum)) {
+                            this._cea708_services.set(serviceNum, new Cea708Service(serviceNum));
+                        }
+                        const svc = this._cea708_services.get(serviceNum)!;
+                        const startPos = pkt.getPosition();
+                        while (pkt.getPosition() - startPos < blockSize) {
+                            svc.handleCea708ControlCode(pkt);
+                        }
+                    }
+                }
+            } catch (e) {
+                // Invalid packet — skip
+            }
+        }
+        this._dtvcc_builder.clearBuiltPackets();
     }
 
     /**
@@ -333,6 +395,8 @@ export default class CaptionController {
         this._dtvcc_builder.clear();
         this._cea708_services.clear();
         this._cea708_order = 0;
+        this._cea708_pending = [];
+        this._cea708_newest_pts = 0;
         this._has_dtvcc_data = false;
         this._snapshots = [];
         this._last_painted = null;
