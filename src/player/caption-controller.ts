@@ -47,6 +47,10 @@ export default class CaptionController {
     private static readonly SNAPSHOT_CAP = 512;
     /** Last text painted to the renderer — repaint only on change. */
     private _last_painted: string | null = null;
+    /** How far ahead a completing packet may sit for a half-written row to be
+     *  held back. Observed splits complete within 40–160 ms (1–4 frames at
+     *  25fps); anything beyond this is treated as a state of its own. */
+    private static readonly MID_WORD_HOLD_SEC = 0.4;
     private _raf_handle: number | null = null;
 
 
@@ -262,14 +266,44 @@ export default class CaptionController {
                 // Drop superseded states; keep the displayed one at index 0 so
                 // a deselect/reselect cycle can repaint it.
                 if (reached > 0) this._snapshots.splice(0, reached);
-                const text = this._snapshots[0].text;
-                if (text !== this._last_painted) {
-                    this._last_painted = text;
-                    this._renderer.setText(text);
+                const state = this._snapshots[0];
+                const next = this._snapshots[1];
+
+                // A row arrives a DTVCC packet at a time, so it can be on the
+                // wire half-written for a frame or two — "Pres" a moment before
+                // "President". Painting that reads as dropped characters. Hold
+                // the half-written state until the packet that completes the
+                // word is reached; bounded by MID_WORD_HOLD_SEC so a genuinely
+                // final state (nothing coming to complete it) still paints.
+                const holdForCompletion = next !== undefined
+                    && next.pts - state.pts <= CaptionController.MID_WORD_HOLD_SEC
+                    && CaptionController._splitsWord(state.text, next.text);
+
+                if (!holdForCompletion && state.text !== this._last_painted) {
+                    this._last_painted = state.text;
+                    this._renderer.setText(state.text);
                 }
             }
         }
         this._raf_handle = requestAnimationFrame(this._tick);
+    }
+
+    /**
+     * True when `pending` only carries `shown` further into the middle of a
+     * word — i.e. `shown` is `pending` cut mid-token, not a caption state a
+     * viewer should ever see.
+     *
+     * Deliberately strict: it requires a pure extension, so a roll-up (which
+     * rewrites the earlier rows) or any text change fails the prefix test and
+     * paints immediately.
+     */
+    private static _splitsWord(shown: string, pending: string): boolean {
+        if (!shown || pending.length <= shown.length) return false;
+        if (!pending.startsWith(shown)) return false;
+        // A row that ends on a completed token is a legitimate state.
+        if (/\s$/.test(shown)) return false;
+        // …and the next character has to continue that same token.
+        return !/\s/.test(pending.charAt(shown.length));
     }
 
     enableCaptions(): void {

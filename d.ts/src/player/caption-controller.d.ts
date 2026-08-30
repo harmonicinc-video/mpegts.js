@@ -18,6 +18,10 @@ export default class CaptionController {
     private static readonly SNAPSHOT_CAP;
     /** Last text painted to the renderer — repaint only on change. */
     private _last_painted;
+    /** How far ahead a completing packet may sit for a half-written row to be
+     *  held back. Observed splits complete within 40–160 ms (1–4 frames at
+     *  25fps); anything beyond this is treated as a state of its own. */
+    private static readonly MID_WORD_HOLD_SEC;
     private _raf_handle;
     constructor(mediaElement: HTMLMediaElement, config: any, sharedRenderer?: CaptionRenderer);
     /**
@@ -49,6 +53,16 @@ export default class CaptionController {
      * as-is rather than cleared.
      */
     private _tick;
+    /**
+     * True when `pending` only carries `shown` further into the middle of a
+     * word — i.e. `shown` is `pending` cut mid-token, not a caption state a
+     * viewer should ever see.
+     *
+     * Deliberately strict: it requires a pure extension, so a roll-up (which
+     * rewrites the earlier rows) or any text change fails the prefix test and
+     * paints immediately.
+     */
+    private static _splitsWord;
     enableCaptions(): void;
     disableCaptions(): void;
     /**
