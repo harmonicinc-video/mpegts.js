@@ -155,13 +155,13 @@ class MSEPlayer {
 
     // --- Unified caption/subtitle track selection (CEA-608/708 + DVB TTML) ---
 
-    // Returns the selectable tracks: { id, type: 'cea'|'ttml', label, lang?, pid? }.
-    public getCaptionTracks(): { id: string, type: string, label: string, lang?: string, pid?: number }[] {
+    // Returns the selectable tracks: { id, type: 'cea'|'ttml', label, lang?, pid?, service? } — one CEA track per 708 service.
+    public getCaptionTracks(): { id: string, type: string, label: string, lang?: string, pid?: number, service?: number }[] {
         const mgr = this._caption_manager;
         return mgr ? mgr.getTracks() : [];
     }
 
-    // Active track id ('cea' | 'ttml:<pid>' | 'off'), or null before any data.
+    // Active track id ('cea:<service>' | 'ttml:<pid>' | 'off'), or null before any data.
     public getActiveCaptionTrack(): string | null {
         const mgr = this._caption_manager;
         return mgr ? mgr.getActiveTrack() : null;

@@ -5,6 +5,7 @@ export interface CaptionTrack {
     label: string;
     lang?: string;
     pid?: number;
+    service?: number;
 }
 export default class CaptionTrackManager {
     private TAG;

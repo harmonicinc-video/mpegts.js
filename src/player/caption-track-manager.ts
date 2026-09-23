@@ -7,7 +7,8 @@
  * stack on screen.
  *
  * Track ids:
- *   'cea'         the merged CEA-608/708 caption track
+ *   'cea:<n>'     one CEA-708 service (one language, ADR 0023); `cea` alone
+ *                 means service 1, for callers that predate multi-language CEA
  *   'ttml:<pid>'  one DVB TTML subtitle stream (per PID / language)
  *   'off'         nothing rendered
  *
@@ -22,12 +23,16 @@ import TTMLSubtitleController from './ttml-subtitle-controller';
 import { DVBTTMLData } from '../demux/dvb-ttml-data';
 
 export interface CaptionTrack {
-    id: string;                     // 'cea' | 'ttml:<pid>'
+    id: string;                     // 'cea:<service>' | 'ttml:<pid>'
     type: 'cea' | 'ttml';
     label: string;                  // human-readable, e.g. 'DVB TTML (deu)'
     lang?: string;                  // ISO-639 language (TTML only)
     pid?: number;                   // elementary PID (TTML only)
+    service?: number;               // CEA-708 service number (CEA only)
 }
+
+/** The 608 channel that carries the same language as a 708 service (ADR 0023). */
+const CEA_CHANNEL_OF_SERVICE: { [service: number]: string } = { 1: 'CC1', 2: 'CC3', 3: 'CC2', 4: 'CC4' };
 
 export default class CaptionTrackManager {
     private TAG: string = 'CaptionTrackManager';
@@ -68,7 +73,7 @@ export default class CaptionTrackManager {
         if (!this._cea_seen) {
             this._cea_seen = true;
             Log.v(this.TAG, 'CEA-608/708 caption track discovered');
-            this._autoSelect('cea');
+            this._autoSelect('cea:1');
         }
     }
 
@@ -94,7 +99,19 @@ export default class CaptionTrackManager {
     getTracks(): CaptionTrack[] {
         const out: CaptionTrack[] = [];
         if (this._cea_seen) {
-            out.push({ id: 'cea', type: 'cea', label: 'CEA-608/708' });
+            const services = this._caption_controller?.getServices() ?? [];
+            // 608-only streams (no DTVCC) still show as one CEA track.
+            for (const service of services.length > 0 ? services : [1]) {
+                const channel = CEA_CHANNEL_OF_SERVICE[service];
+                out.push({
+                    id: `cea:${service}`,
+                    type: 'cea',
+                    label: services.length > 1
+                        ? `CEA-608/708 ${channel ? channel + ' / ' : ''}service ${service}`
+                        : 'CEA-608/708',
+                    service,
+                });
+            }
         }
         for (const t of this._ttml_tracks) {
             out.push({
@@ -115,13 +132,19 @@ export default class CaptionTrackManager {
 
     /** Select a track by id ('cea' | 'ttml:<pid>'), or 'off'/null to render nothing. */
     setActiveTrack(id: string | null): void {
-        const next = id == null ? 'off' : id;
+        let next = id == null ? 'off' : id;
+        if (next === 'cea') next = 'cea:1';
         this._active = next;
 
-        const ceaActive = next === 'cea';
+        const ceaActive = next.indexOf('cea:') === 0;
         const ttmlActive = next.indexOf('ttml:') === 0;
 
         if (this._caption_controller) {
+            if (ceaActive) {
+                this._caption_controller.setSelectedService(
+                    parseInt(next.substring('cea:'.length), 10) || 1,
+                );
+            }
             this._caption_controller.setRenderingActive(ceaActive);
         }
         if (this._ttml_controller) {

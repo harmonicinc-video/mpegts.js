@@ -23,7 +23,10 @@ export default class CaptionController {
      */
     private static readonly CEA708_REORDER_SEC;
     private _has_dtvcc_data;
-    private _snapshots;
+    private _service_snapshots;
+    /** The 708 service painted; its queue is `_snapshots`. */
+    private _selected_service;
+    private get _snapshots();
     /** Hard bound on queued snapshots (background tabs pause rAF while the
      *  worker keeps demuxing; oldest states are stale on a live stream). */
     private static readonly SNAPSHOT_CAP;
@@ -82,6 +85,10 @@ export default class CaptionController {
      * the right text for the current playhead immediately.
      */
     private _checkNeedsDisplay;
+    /** The 708 services seen so far, ascending: one caption track each. */
+    getServices(): number[];
+    /** Paint `service` from now on; its queue is already current. */
+    setSelectedService(service: number): void;
     /**
      * Paint the snapshot the playhead has reached: the latest one with
      * pts <= currentTime. States decoded ahead of playback (demux runs ahead

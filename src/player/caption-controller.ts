@@ -52,7 +52,20 @@ export default class CaptionController {
     // Playhead-synced display: decoded 708 display states, stamped with the
     // PTS (seconds, playback timeline) of the caption data that produced them.
     // A rAF ticker paints the latest snapshot whose pts <= currentTime.
-    private _snapshots: { pts: number, text: string }[] = [];
+    // One queue per 708 service: each service is one language (ADR 0023,
+    // CC1/service 1, CC3/service 2, ...), and only the selected one is shown.
+    // Merging them stacked every language on one overlay.
+    private _service_snapshots: Map<number, { pts: number, text: string }[]> = new Map();
+    /** The 708 service painted; its queue is `_snapshots`. */
+    private _selected_service = 1;
+    private get _snapshots(): { pts: number, text: string }[] {
+        let queue = this._service_snapshots.get(this._selected_service);
+        if (!queue) {
+            queue = [];
+            this._service_snapshots.set(this._selected_service, queue);
+        }
+        return queue;
+    }
     /** Hard bound on queued snapshots (background tabs pause rAF while the
      *  worker keeps demuxing; oldest states are stale on a live stream). */
     private static readonly SNAPSHOT_CAP = 512;
@@ -275,32 +288,35 @@ export default class CaptionController {
      * the right text for the current playhead immediately.
      */
     private _checkNeedsDisplay(pts_sec: number): void {
-        let needsUpdate = false;
-        const services = Array.from(this._cea708_services) as any[];
-        for (let i = 0; i < services.length; i++) {
-            const svc = services[i][1];
-            if (svc.needsDisplay) {
-                needsUpdate = true;
-                svc.needsDisplay = false;
+        this._cea708_services.forEach((svc, number) => {
+            if (!svc.needsDisplay) return;
+            svc.needsDisplay = false;
+            const text = svc.getDisplayText();
+            let queue = this._service_snapshots.get(number);
+            if (!queue) {
+                queue = [];
+                this._service_snapshots.set(number, queue);
             }
-        }
-        if (!needsUpdate) return;
+            // Skip no-op states; an empty string is a real state (screen clear).
+            const last = queue[queue.length - 1];
+            if (last && last.text === text) return;
+            queue.push({ pts: pts_sec, text });
+            if (queue.length > CaptionController.SNAPSHOT_CAP) {
+                queue.splice(0, queue.length - CaptionController.SNAPSHOT_CAP);
+            }
+        });
+    }
 
-        const parts: string[] = [];
-        for (let i = 0; i < services.length; i++) {
-            const t = services[i][1].getDisplayText();
-            if (t) parts.push(t);
-        }
-        const text = parts.join('\n');
+    /** The 708 services seen so far, ascending: one caption track each. */
+    getServices(): number[] {
+        return Array.from(this._cea708_services.keys()).sort((a, b) => a - b);
+    }
 
-        // Skip no-op states; an empty string is a real state (screen clear).
-        const last = this._snapshots[this._snapshots.length - 1];
-        if (last && last.text === text) return;
-
-        this._snapshots.push({ pts: pts_sec, text });
-        if (this._snapshots.length > CaptionController.SNAPSHOT_CAP) {
-            this._snapshots.splice(0, this._snapshots.length - CaptionController.SNAPSHOT_CAP);
-        }
+    /** Paint `service` from now on; its queue is already current. */
+    setSelectedService(service: number): void {
+        if (service === this._selected_service) return;
+        this._selected_service = service;
+        this._last_painted = null;
     }
 
     /**
@@ -398,7 +414,7 @@ export default class CaptionController {
         this._cea708_pending = [];
         this._cea708_newest_pts = 0;
         this._has_dtvcc_data = false;
-        this._snapshots = [];
+        this._service_snapshots.clear();
         this._last_painted = null;
     }
 
@@ -407,7 +423,7 @@ export default class CaptionController {
             cancelAnimationFrame(this._raf_handle);
             this._raf_handle = null;
         }
-        this._snapshots = [];
+        this._service_snapshots.clear();
         this._cea608_parser1 = null;
         this._cea608_parser2 = null;
         this._dtvcc_builder = null;

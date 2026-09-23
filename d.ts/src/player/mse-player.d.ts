@@ -34,6 +34,7 @@ declare class MSEPlayer {
         label: string;
         lang?: string;
         pid?: number;
+        service?: number;
     }[];
     getActiveCaptionTrack(): string | null;
     setCaptionTrack(id: string | null): void;
