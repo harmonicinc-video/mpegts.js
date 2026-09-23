@@ -356,10 +356,10 @@ declare namespace Mpegts {
         disableCaptions?(): void;
         /**
          * List the selectable caption/subtitle tracks, unifying CEA-608/708
-         * (id 'cea') and DVB TTML (id 'ttml:<pid>', one per language).
+         * (id 'cea:<service>', one per 708 service) and DVB TTML (id 'ttml:<pid>', one per language).
          */
-        getCaptionTracks?(): { id: string, type: string, label: string, lang?: string, pid?: number }[];
-        /** Active track id ('cea' | 'ttml:<pid>' | 'off'), or null before data arrives. */
+        getCaptionTracks?(): { id: string, type: string, label: string, lang?: string, pid?: number, service?: number }[];
+        /** Active track id ('cea:<service>' | 'ttml:<pid>' | 'off'), or null before data arrives. */
         getActiveCaptionTrack?(): string | null;
         /** Select a track by id, or 'off'/null to render nothing. */
         setCaptionTrack?(id: string | null): void;
