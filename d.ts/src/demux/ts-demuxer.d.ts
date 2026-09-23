@@ -17,6 +17,11 @@ declare class TSDemuxer extends BaseDemuxer {
     private section_slice_queues_;
     private video_metadata_;
     private audio_metadata_;
+    /**
+     * Language per CEA-708 service, from the ATSC caption service descriptor
+     * (0x86) on the current program's video ES. Empty when the PMT has none.
+     */
+    private caption_languages_;
     private last_pcr_;
     private last_pcr_base_;
     private timestamp_offset_;
@@ -81,6 +86,14 @@ declare class TSDemuxer extends BaseDemuxer {
     private parseSCTE35;
     private parseAV1Payload;
     private removeEmulationPreventionBytes;
+    /**
+     * Language per CEA-708 service from an ES's descriptors: the ATSC caption
+     * service descriptor (A/65 §6.9.2), 0x86. Only digital (708) entries name
+     * a service; a 608 entry names a field, which two channels share.
+     */
+    static parseCaptionServices(descriptors: Uint8Array): {
+        [service: number]: string;
+    };
     private extractCEA608FromSEI;
     private extractCEA608FromH265SEI;
     private parseH264Payload;

@@ -141,6 +141,12 @@ class TSDemuxer extends BaseDemuxer {
         channel_config: undefined
     };
 
+    /**
+     * Language per CEA-708 service, from the ATSC caption service descriptor
+     * (0x86) on the current program's video ES. Empty when the PMT has none.
+     */
+    private caption_languages_: { [service: number]: string } = {};
+
     private last_pcr_: number | undefined;
     private last_pcr_base_: number = NaN;
     private timestamp_offset_: number = 0;
@@ -855,6 +861,8 @@ class TSDemuxer extends BaseDemuxer {
         let info_start_index = 12 + program_info_length;
         let info_bytes = section_length - 9 - program_info_length - 4;
 
+        let caption_languages: { [service: number]: string } = {};
+
         for (let i = info_start_index; i < info_start_index + info_bytes; ) {
             let stream_type = data[i] as StreamType;
             let elementary_PID = ((data[i + 1] & 0x1F) << 8) | data[i + 2];
@@ -865,10 +873,13 @@ class TSDemuxer extends BaseDemuxer {
             let already_has_video =  pmt.common_pids.h264 || pmt.common_pids.h265;
             let already_has_audio = pmt.common_pids.adts_aac || pmt.common_pids.loas_aac || pmt.common_pids.ac3 || pmt.common_pids.eac3 || pmt.common_pids.opus || pmt.common_pids.mp3;
 
-            if (stream_type === StreamType.kH264 && !already_has_video) {
-                pmt.common_pids.h264 = elementary_PID;
-            } else if (stream_type === StreamType.kH265 && !already_has_video) {
-                pmt.common_pids.h265 = elementary_PID;
+            if ((stream_type === StreamType.kH264 || stream_type === StreamType.kH265) && !already_has_video) {
+                if (stream_type === StreamType.kH264) {
+                    pmt.common_pids.h264 = elementary_PID;
+                } else {
+                    pmt.common_pids.h265 = elementary_PID;
+                }
+                caption_languages = TSDemuxer.parseCaptionServices(data.subarray(i + 5, i + 5 + ES_info_length));
             } else if (stream_type === StreamType.kADTSAAC
                     || stream_type === StreamType.kLOASAAC
                     || stream_type === StreamType.kAC3
@@ -1025,6 +1036,7 @@ class TSDemuxer extends BaseDemuxer {
         }
 
         if (program_number === this.current_program_) {
+            this.caption_languages_ = caption_languages;
             // If the caller has selected a specific audio PID, override the default
             // "first audio wins" selection that the loop above established.
             if (this.active_audio_pid_ !== undefined) {
@@ -1172,6 +1184,30 @@ class TSDemuxer extends BaseDemuxer {
         return dst.subarray(0, dstIdx);
     }
 
+    /**
+     * Language per CEA-708 service from an ES's descriptors: the ATSC caption
+     * service descriptor (A/65 §6.9.2), 0x86. Only digital (708) entries name
+     * a service; a 608 entry names a field, which two channels share.
+     */
+    static parseCaptionServices(descriptors: Uint8Array): { [service: number]: string } {
+        const out: { [service: number]: string } = {};
+        for (let offset = 0; offset + 2 <= descriptors.length; ) {
+            const tag = descriptors[offset];
+            const length = descriptors[offset + 1];
+            if (tag === 0x86 && length >= 1 && offset + 2 + length <= descriptors.length) {
+                const count = descriptors[offset + 2] & 0x1F;
+                for (let n = 0, e = offset + 3; n < count && e + 6 <= offset + 2 + length; n++, e += 6) {
+                    const flags = descriptors[e + 3];
+                    if (flags & 0x80) {
+                        out[flags & 0x3F] = String.fromCharCode(descriptors[e], descriptors[e + 1], descriptors[e + 2]);
+                    }
+                }
+            }
+            offset += 2 + length;
+        }
+        return out;
+    }
+
     private extractCEA608FromSEI(seiData: Uint8Array): { ccData: Uint8Array, ccCount: number } | null {
         const rbsp = this.removeEmulationPreventionBytes(seiData);
         let offset = 1; // skip NAL header byte for H.264
@@ -1290,7 +1326,7 @@ class TSDemuxer extends BaseDemuxer {
                 const ccResult = this.extractCEA608FromSEI(nalu_payload.data);
                 if (ccResult && this.onCaptionData) {
                     let pts_ms_caption = Math.floor(pts / this.timescale_);
-                    this.onCaptionData(pts_ms_caption, ccResult);
+                    this.onCaptionData(pts_ms_caption, { ...ccResult, languages: this.caption_languages_ });
                 }
             }
 
@@ -1377,7 +1413,7 @@ class TSDemuxer extends BaseDemuxer {
                 const ccResult = this.extractCEA608FromH265SEI(nalu_payload.data);
                 if (ccResult && this.onCaptionData) {
                     let pts_ms_caption = Math.floor(pts / this.timescale_);
-                    this.onCaptionData(pts_ms_caption, ccResult);
+                    this.onCaptionData(pts_ms_caption, { ...ccResult, languages: this.caption_languages_ });
                 }
             }
 

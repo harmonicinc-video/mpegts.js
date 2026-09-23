@@ -26,7 +26,7 @@ export interface CaptionTrack {
     id: string;                     // 'cea:<service>' | 'ttml:<pid>'
     type: 'cea' | 'ttml';
     label: string;                  // human-readable, e.g. 'DVB TTML (deu)'
-    lang?: string;                  // ISO-639 language (TTML only)
+    lang?: string;                  // ISO-639 language (TTML; CEA when the PMT names it)
     pid?: number;                   // elementary PID (TTML only)
     service?: number;               // CEA-708 service number (CEA only)
 }
@@ -41,6 +41,9 @@ export default class CaptionTrackManager {
     private _ttml_controller: TTMLSubtitleController | null = null;
 
     private _cea_seen: boolean = false;
+    // ISO 639-2 per CEA-708 service, from the PMT's caption service
+    // descriptor (0x86); empty when the stream carries none.
+    private _cea_languages: { [service: number]: string } = {};
     private _ttml_tracks: { pid: number, lang: string }[] = [];
 
     // Active track id: 'cea' | 'ttml:<pid>' | 'off'. null means "not yet locked"
@@ -67,8 +70,11 @@ export default class CaptionTrackManager {
 
     // --- data ingress (from the player engine event handlers) ---
 
-    onCaptionData(pts_ms: number, data: { ccData: Uint8Array, ccCount: number }): void {
+    onCaptionData(pts_ms: number, data: { ccData: Uint8Array, ccCount: number, languages?: { [service: number]: string } }): void {
         if (!this._caption_controller) { return; }
+        if (data.languages) {
+            this._cea_languages = data.languages;
+        }
         this._caption_controller.onCaptionData(pts_ms, data);
         if (!this._cea_seen) {
             this._cea_seen = true;
@@ -103,12 +109,24 @@ export default class CaptionTrackManager {
             // 608-only streams (no DTVCC) still show as one CEA track.
             for (const service of services.length > 0 ? services : [1]) {
                 const channel = CEA_CHANNEL_OF_SERVICE[service];
+                const lang = this._cea_languages[service];
+                // With a language from the PMT: 'CEA-608/708 (fre, CC3)'.
+                // Without one, the channel and service are all there is.
+                let label: string;
+                if (lang) {
+                    label = services.length > 1 && channel
+                        ? `CEA-608/708 (${lang}, ${channel})`
+                        : `CEA-608/708 (${lang})`;
+                } else {
+                    label = services.length > 1
+                        ? `CEA-608/708 ${channel ? channel + ' / ' : ''}service ${service}`
+                        : 'CEA-608/708';
+                }
                 out.push({
                     id: `cea:${service}`,
                     type: 'cea',
-                    label: services.length > 1
-                        ? `CEA-608/708 ${channel ? channel + ' / ' : ''}service ${service}`
-                        : 'CEA-608/708',
+                    label,
+                    lang,
                     service,
                 });
             }

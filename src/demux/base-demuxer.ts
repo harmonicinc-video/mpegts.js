@@ -18,7 +18,8 @@ type OnSynchronousKLVMetadataCallback = (synchronous_klv_data: KLVData) => void;
 type OnAsynchronousKLVMetadataCallback = (asynchronous_klv_data: PESPrivateData) => void;
 type OnSMPTE2038MetadataCallback = (smpte2038_data: SMPTE2038Data) => void;
 type OnSCTE35MetadataCallback = (scte35_data: SCTE35Data) => void;
-type OnCaptionDataCallback = (pts: number, data: { ccData: Uint8Array, ccCount: number }) => void;
+/** `languages`: ISO 639-2 code per CEA-708 service, from the PMT's 0x86 (may be empty). */
+type OnCaptionDataCallback = (pts: number, data: { ccData: Uint8Array, ccCount: number, languages?: { [service: number]: string } }) => void;
 type OnPESPrivateDataCallback = (private_data: PESPrivateData) => void;
 type OnPESPrivateDataDescriptorCallback = (private_data_descriptor: PESPrivateDataDescriptor) => void;
 type OnAudioTracksUpdatedCallback = (tracks: { pid: number, type: string, lang: string }[]) => void;

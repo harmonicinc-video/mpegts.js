@@ -13,6 +13,7 @@ export default class CaptionTrackManager {
     private _caption_controller;
     private _ttml_controller;
     private _cea_seen;
+    private _cea_languages;
     private _ttml_tracks;
     private _active;
     private _enabled;
@@ -20,6 +21,9 @@ export default class CaptionTrackManager {
     onCaptionData(pts_ms: number, data: {
         ccData: Uint8Array;
         ccCount: number;
+        languages?: {
+            [service: number]: string;
+        };
     }): void;
     onDVBTTMLData(ttml_data: DVBTTMLData): void;
     /** First source to produce data wins, until the consumer chooses explicitly. */
