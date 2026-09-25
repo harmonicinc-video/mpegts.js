@@ -33,6 +33,7 @@ declare class TSDemuxer extends BaseDemuxer {
     private audio_init_segment_dispatched_;
     private active_audio_pid_;
     private video_metadata_changed_;
+    private stale_pps_guard_;
     private audio_metadata_changed_;
     private loas_previous_frame;
     private video_track_;
@@ -96,6 +97,7 @@ declare class TSDemuxer extends BaseDemuxer {
     };
     private extractCEA608FromSEI;
     private extractCEA608FromH265SEI;
+    private readNextH264Payload;
     private parseH264Payload;
     private parseH265Payload;
     private detectVideoMetadataChange;

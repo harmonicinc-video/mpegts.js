@@ -24,6 +24,7 @@ import BaseDemuxer from './base-demuxer';
 import { PAT, PESData, SectionData, SliceQueue, PIDToSliceQueues, PMT, ProgramToPMTMap, StreamType, AudioPIDInfo } from './pat-pmt-pes';
 import { AVCDecoderConfigurationRecord, H264AnnexBParser, H264NaluAVC1, H264NaluPayload, H264NaluType } from './h264';
 import SPSParser from './sps-parser';
+import { H264StalePPSGuard } from './h264-stale-pps-guard';
 import { AACADTSParser, AACFrame, AACLOASParser, AudioSpecificConfig, LOASAACFrame } from './aac';
 import { MPEG4AudioObjectTypes, MPEG4SamplingFrequencyIndex } from './mpeg4-audio';
 import { PESPrivateData, PESPrivateDataDescriptor } from './pes-private-data';
@@ -162,6 +163,7 @@ class TSDemuxer extends BaseDemuxer {
     // PID of the currently active audio stream; undefined = use first audio found.
     private active_audio_pid_: number | undefined = undefined;
     private video_metadata_changed_ = false;
+    private stale_pps_guard_ = new H264StalePPSGuard();
     private audio_metadata_changed_ = false;
     private loas_previous_frame: LOASAACFrame | null = null;
 
@@ -1284,14 +1286,38 @@ class TSDemuxer extends BaseDemuxer {
         return null;
     }
 
+    // Next NAL unit from the parser, after H264StalePPSGuard. A NAL the guard
+    // expands into several leaves the rest in `queued`.
+    private readNextH264Payload(parser: H264AnnexBParser, queued: H264NaluPayload[]): H264NaluPayload {
+        if (queued.length) {
+            return queued.shift();
+        }
+        let raw = parser.readNextNaluPayload();
+        if (raw == null) {
+            return null;
+        }
+        let replaced = this.stale_pps_guard_.process(raw.data);
+        if (!replaced) {
+            return raw;
+        }
+        for (let i = 0; i < replaced.length; i++) {
+            let p = new H264NaluPayload();
+            p.type = replaced[i][0] & 0x1F;
+            p.data = replaced[i];
+            queued.push(p);
+        }
+        return queued.shift();
+    }
+
     private parseH264Payload(data: Uint8Array, pts: number, dts: number, file_position: number, random_access_indicator: number) {
         let annexb_parser = new H264AnnexBParser(data);
         let nalu_payload: H264NaluPayload = null;
         let units: {type: H264NaluType, data: Uint8Array}[] = [];
         let length = 0;
         let keyframe = false;
+        let queued: H264NaluPayload[] = [];
 
-        while ((nalu_payload = annexb_parser.readNextNaluPayload()) != null) {
+        while ((nalu_payload = this.readNextH264Payload(annexb_parser, queued)) != null) {
             let nalu_avc1 = new H264NaluAVC1(nalu_payload);
 
             if (nalu_avc1.type === H264NaluType.kSliceSPS) {
