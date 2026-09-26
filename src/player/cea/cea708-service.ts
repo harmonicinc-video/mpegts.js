@@ -159,6 +159,13 @@ export class Cea708Service {
     }
 
     private handleC1(pkt: DtvccPacket, cmd: number, pts: number): Cea708Caption[] {
+        // Clear, Display, Hide, Toggle, Delete and Reset change what is on
+        // screen without writing text, so no ETX follows to request a
+        // refresh: without this an encoder's idle erase leaves the last line
+        // up until the next speech. The controller skips unchanged states.
+        if ((cmd >= 0x88 && cmd <= 0x8c) || cmd === 0x8f) {
+            this.needsDisplay = true;
+        }
         if (cmd >= 0x80 && cmd <= 0x87) {
             // CWx — Set current window
             const wn = cmd & 0x07;
