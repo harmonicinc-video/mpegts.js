@@ -130,14 +130,17 @@ export default class CaptionController {
         const extracted = this.extractCcData(data.ccData, mediaTime);
 
         // --- CEA-708 DTVCC path ---
+        // Every frame's SEI moves the reorder cutoff, padding-only ones too:
+        // an encoder goes quiet after its idle erase, and if only DTVCC bytes
+        // advanced the cutoff that erase would wait for the next speech.
+        if (mediaTime > this._cea708_newest_pts) this._cea708_newest_pts = mediaTime;
         if (extracted.cea708.length > 0) {
             this._has_dtvcc_data = true;
             for (const byte of extracted.cea708) {
                 this._cea708_pending.push(byte);
-                if (byte.pts > this._cea708_newest_pts) this._cea708_newest_pts = byte.pts;
             }
-            this._drainCea708();
         }
+        if (this._cea708_pending.length > 0) this._drainCea708();
 
         // --- CEA-608 path (only if no DTVCC data in stream) ---
         if (!this._has_dtvcc_data) {
